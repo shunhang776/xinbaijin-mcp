@@ -5,6 +5,7 @@ export default {
     const repo = body.repository?.full_name;
     const commits = body.commits || [];
     const lastCommit = commits[commits.length - 1];
+    console.log("force trigger webhook 123");
 
     return new Response(JSON.stringify({
       ok: true,
