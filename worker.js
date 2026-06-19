@@ -4,12 +4,15 @@ export default {
 
     const repo = body.repository?.full_name;
     const commits = body.commits || [];
+    const lastCommit = commits[commits.length - 1];
 
     return new Response(JSON.stringify({
       ok: true,
-      repo,
+      repo: repo,
       commit_count: commits.length,
-      last_commit: commits[commits.length - 1]?.message
-    }));
+      message: lastCommit?.message
+    }), {
+      headers: { "content-type": "application/json" }
+    });
   }
 };
