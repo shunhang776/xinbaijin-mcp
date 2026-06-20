@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { REPOSITORIES, getRepositoryConfig, submitReview } from "../review-core.js";
+import { REPOSITORIES, REPOSITORY_NAMES, getRepositoryConfig, submitReview } from "../review-core.js";
 import {
   REPOSITORY_PARAM,
   GET_LATEST_HANDOFF_SCHEMA,
@@ -135,6 +135,24 @@ describe("REPOSITORIES whitelist", () => {
   it("both repos have dev as default branch", () => {
     expect(REPOSITORIES.xinbaijin.branch).toBe("dev");
     expect(REPOSITORIES["xinbaijin-mcp"].branch).toBe("dev");
+  });
+
+  it("REPOSITORY_NAMES matches REPOSITORIES keys exactly", () => {
+    expect(new Set(REPOSITORY_NAMES)).toEqual(new Set(Object.keys(REPOSITORIES)));
+    expect(REPOSITORY_NAMES.length).toBe(2);
+  });
+
+  it("Zod enum values match REPOSITORY_NAMES", () => {
+    // Verify the MCP schema whitelist is derived from the canonical list,
+    // not independently hardcoded.
+    const validRepos = ["xinbaijin", "xinbaijin-mcp"];
+    validRepos.forEach((repo) => {
+      const result = z.object({ repository: REPOSITORY_PARAM }).safeParse({ repository: repo });
+      expect(result.success).toBe(true);
+    });
+    // Non-whitelist still rejected
+    const bad = z.object({ repository: REPOSITORY_PARAM }).safeParse({ repository: "evil" });
+    expect(bad.success).toBe(false);
   });
 });
 

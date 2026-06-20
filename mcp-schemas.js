@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { REPOSITORY_NAMES } from "./review-core.js";
 
 // 所有 4 个 MCP 工具共享的 repository 参数
 // 提取为独立模块：worker.js 和 test 共同导入，避免重复定义
 export const REPOSITORY_PARAM = z
-  .enum(["xinbaijin", "xinbaijin-mcp"])
+  .enum(REPOSITORY_NAMES)
   .describe("目标仓库（必填）");
 
 // ---------------------------------------------------------------------------

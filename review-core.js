@@ -12,6 +12,10 @@ const REPOSITORIES = Object.freeze({
   }
 });
 
+// Canonical repository name list — single source of truth for whitelist.
+// mcp-schemas.js derives its Zod enum from this array.
+export const REPOSITORY_NAMES = Object.freeze(Object.keys(REPOSITORIES));
+
 const DEFAULT_REPOSITORY = "xinbaijin";
 
 function getRepositoryConfig(env, repositoryName) {
@@ -498,6 +502,18 @@ async function updateBranchRefFastForward(
   // Defense-in-depth: re-read branch head immediately before PATCH.
   // Shrinks the race window. Combined with force:false this ensures
   // the new commit is a descendant of the current tip.
+  //
+  // NOTE: The re-read + PATCH below is NOT an atomic compare-and-swap.
+  // A race window remains between the re-read and the PATCH where another
+  // actor could force-push dev to an ancestor. The review commit would
+  // still be a descendant of that ancestor, so force:false might allow it.
+  //
+  // Required operational mitigations:
+  //   - Enable branch protection on dev: no force-push, no deletion.
+  //   - Ensure submit_review has a single serial writer (no concurrent
+  //     review submissions against the same branch).
+  //
+  // These together close the residual TOCTOU window.
   const currentHead = await getBranchHeadSha(env, repositoryName);
 
   if (currentHead !== expectedParentSha) {
