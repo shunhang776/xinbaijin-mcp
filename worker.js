@@ -5,6 +5,8 @@ import { z } from "zod";
 import { Buffer } from "node:buffer";
 import { REPOSITORIES, DEFAULT_REPOSITORY, submitReview, getRepositoryConfig, githubHeaders } from "./review-core.js";
 
+export { REPOSITORY_PARAM } from "./mcp-schemas.js";
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -51,7 +53,7 @@ export default {
   }
 };
 
-function createServer(env) {
+export function createServer(env) {
   const server = new McpServer({
     name: "xinbaijin-mcp",
     version: "1.0.0"
@@ -63,7 +65,7 @@ function createServer(env) {
       description:
         "读取目标仓库（必填）dev 分支的最新提交，并生成标准化 handoff。",
       inputSchema: {
-        repository: z.enum(["xinbaijin","xinbaijin-mcp"]).describe("目标仓库（必填）")
+        repository: REPOSITORY_PARAM
       }
     },
     async ({ repository }) => {
@@ -106,7 +108,7 @@ function createServer(env) {
   "文件末尾换行或编码问题时，不得仅根据 patch 下结论，" +
   "必须调用 get_file_content 核实原始源码。",
   inputSchema: z.object({
-  repository: z.enum(["xinbaijin","xinbaijin-mcp"]).describe("目标仓库（必填）"),
+  repository: REPOSITORY_PARAM,
   sha: z
     .string()
     .trim()
@@ -185,7 +187,7 @@ return {
       description:
         "将 ChatGPT 的代码审查结果写入目标仓库（必填）dev 分支根目录 review.json。此工具只能写 review.json，不能修改源代码。",
       inputSchema: z.object({
-        repository: z.enum(["xinbaijin","xinbaijin-mcp"]).describe("目标仓库（必填）"),
+        repository: REPOSITORY_PARAM,
         commit: z
           .string()
           .regex(/^[0-9a-fA-F]{40}$/)
@@ -289,7 +291,7 @@ return {
         "必须调用此工具核实原始文件后才能形成 finding。",
 
       inputSchema: {
-        repository: z.enum(["xinbaijin","xinbaijin-mcp"]).describe("目标仓库（必填）"),
+        repository: REPOSITORY_PARAM,
 
         path: z
           .string()
