@@ -98,29 +98,65 @@ function createServer(env) {
   server.registerTool(
     "get_patch",
     {
-      description:
-        "读取指定提交（默认 dev 最新提交）的文件级 patch，供 ChatGPT 进行代码审查。",
-      inputSchema: z.object({
-        sha: z
-          .string()
-          .trim()
-          .min(7)
-          .optional()
-          .describe("可选提交 SHA；省略时读取 dev 分支最新提交。")
-      })
-    },
+     description:
+  "读取指定提交的文件级 patch，供 ChatGPT 进行代码审查。" +
+  "涉及转义符、引号、Unicode、Base64、JSON 格式、" +
+  "文件末尾换行或编码问题时，不得仅根据 patch 下结论，" +
+  "必须调用 get_file_content 核实原始源码。",
+  inputSchema: z.object({
+  sha: z
+    .string()
+    .trim()
+    .min(7)
+    .optional()
+    .describe("可选提交 SHA；省略时读取 dev 分支最新提交。")
+}),
+outputSchema: {
+  protocol: z.string(),
+  repository: z.string(),
+  branch: z.string(),
+  requested_ref: z.string(),
+  commit: z.string(),
+  message: z.string().nullable(),
+  stats: z.object({
+    additions: z.number(),
+    deletions: z.number(),
+    total: z.number()
+  }),
+  files: z.array(
+    z.object({
+      filename: z.string(),
+      previous_filename: z.string().nullable(),
+      status: z.string().nullable(),
+      additions: z.number(),
+      deletions: z.number(),
+      changes: z.number(),
+      patch_available: z.boolean(),
+      patch: z.string().nullable()
+    })
+  )
+},
+    annotations: {
+      readOnlyHint: true
+    }
+  },
     async ({ sha }) => {
       try {
-        const patch = await getPatch(env, sha);
+       const patch = await getPatch(env, sha);
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(patch, null, 2)
-            }
-          ]
-        };
+return {
+  structuredContent: patch,
+  content: [
+    {
+      type: "text",
+      text:
+        `已获取提交 ${patch.commit} 的 patch，` +
+        `共 ${patch.files.length} 个文件，` +
+        `新增 ${patch.stats.additions} 行，` +
+        `删除 ${patch.stats.deletions} 行。`
+    }
+  ]
+};
       } catch (error) {
         return {
           isError: true,
@@ -215,6 +251,93 @@ function createServer(env) {
             {
               type: "text",
               text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text:
+                error instanceof Error
+                  ? error.message
+                  : String(error)
+            }
+          ]
+        };
+      }
+    }
+  );
+  server.registerTool(
+    "get_file_content",
+    {
+      description:
+        "读取指定 Git 提交中的原始 UTF-8 文件内容，并返回 SHA-256、字节长度、行尾类型等校验信息。" +
+        "当审查涉及转义符、引号、Unicode、Base64、JSON 格式、文件末尾换行或编码时，" +
+        "必须调用此工具核实原始文件后才能形成 finding。",
+
+      inputSchema: {
+        path: z
+          .string()
+          .trim()
+          .min(1)
+          .max(500)
+          .describe("仓库相对路径，例如 worker.js 或 src/index.js。"),
+
+        ref: z
+          .string()
+          .regex(/^[0-9a-fA-F]{40}$/)
+          .describe("要读取的完整 Git commit SHA。")
+      },
+
+      outputSchema: {
+        protocol: z.literal("xinbaijin-file/1.0"),
+        repository: z.string(),
+        ref: z.string(),
+        path: z.string(),
+        encoding: z.literal("utf-8"),
+        github_blob_sha: z.string(),
+        sha256: z.string(),
+        byte_length: z.number().int().nonnegative(),
+        has_trailing_newline: z.boolean(),
+        line_ending: z.enum([
+          "lf",
+          "crlf",
+          "cr",
+          "mixed",
+          "none"
+        ]),
+        content: z.string()
+      },
+
+      annotations: {
+        readOnlyHint: true
+      }
+    },
+
+    async ({ path, ref }) => {
+      try {
+        const result = await getFileContent(env, path, ref);
+
+        return {
+          structuredContent: result,
+
+          // 这里直接返回原始源码，不再 JSON.stringify 整个对象
+          content: [
+            {
+              type: "text",
+              text:
+                `文件：${result.path}\n` +
+                `提交：${result.ref}\n` +
+                `SHA-256：${result.sha256}\n` +
+                `字节数：${result.byte_length}\n` +
+                `行尾：${result.line_ending}\n` +
+                `文件末尾换行：${result.has_trailing_newline}\n\n` +
+                "===== RAW FILE CONTENT =====\n" +
+                result.content +
+                "\n===== END RAW FILE CONTENT ====="
             }
           ]
         };
@@ -576,6 +699,218 @@ async function submitReview(env, input) {
   };
 }
 
+function normalizeRepositoryPath(inputPath) {
+  const normalized = inputPath
+    .trim()
+    .replace(/\\/g, "/");
+
+  if (
+    normalized.startsWith("/") ||
+    normalized.endsWith("/") ||
+    normalized.includes("\0")
+  ) {
+    throw new Error(
+      "Invalid repository path."
+    );
+  }
+
+  const segments = normalized.split("/");
+
+  if (
+    segments.some(
+      (segment) =>
+        segment === "" ||
+        segment === "." ||
+        segment === ".."
+    )
+  ) {
+    throw new Error(
+      "Repository path cannot contain empty, dot, or parent segments."
+    );
+  }
+
+  return segments.join("/");
+}
+
+function encodeRepositoryPath(path) {
+  return path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes)
+    .map((byte) =>
+      byte.toString(16).padStart(2, "0")
+    )
+    .join("");
+}
+
+function detectLineEnding(text) {
+  const crlfCount =
+    (text.match(/\r\n/g) || []).length;
+
+  const withoutCrLf =
+    text.replace(/\r\n/g, "");
+
+  const lfCount =
+    (withoutCrLf.match(/\n/g) || []).length;
+
+  const crCount =
+    (withoutCrLf.match(/\r/g) || []).length;
+
+  const detectedTypes = [
+    crlfCount > 0 ? "crlf" : null,
+    lfCount > 0 ? "lf" : null,
+    crCount > 0 ? "cr" : null
+  ].filter(Boolean);
+
+  if (detectedTypes.length === 0) {
+    return "none";
+  }
+
+  if (detectedTypes.length > 1) {
+    return "mixed";
+  }
+
+  return detectedTypes[0];
+}
+
+async function getFileContent(
+  env,
+  requestedPath,
+  ref
+) {
+  const {
+    owner,
+    repo,
+    token
+  } = getRepositoryConfig(env);
+
+  if (!token) {
+    throw new Error(
+      "GITHUB_TOKEN is not configured in Cloudflare Worker secrets."
+    );
+  }
+
+  const path =
+    normalizeRepositoryPath(requestedPath);
+
+  const encodedPath =
+    encodeRepositoryPath(path);
+
+  const endpoint =
+    `https://api.github.com/repos/${owner}/${repo}` +
+    `/contents/${encodedPath}` +
+    `?ref=${encodeURIComponent(ref)}`;
+
+  const response = await fetch(endpoint, {
+    headers: githubHeaders(token)
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+
+    throw new Error(
+      `Unable to read repository file: ` +
+      `${response.status} ${details}`
+    );
+  }
+
+  const file = await response.json();
+
+  if (
+    Array.isArray(file) ||
+    file.type !== "file"
+  ) {
+    throw new Error(
+      `${path} is not a normal repository file.`
+    );
+  }
+
+  if (
+    file.encoding !== "base64" ||
+    typeof file.content !== "string"
+  ) {
+    throw new Error(
+      `GitHub did not return Base64 file content for ${path}.`
+    );
+  }
+
+  // GitHub 的 Base64 内容中可能包含换行
+  const cleanBase64 =
+    file.content.replace(/\s/g, "");
+
+  const bytes =
+    Buffer.from(cleanBase64, "base64");
+
+  // 防止一次把过大的文件塞入 ChatGPT 上下文
+  const MAX_FILE_BYTES = 500_000;
+
+  if (bytes.byteLength > MAX_FILE_BYTES) {
+    throw new Error(
+      `File is too large: ${bytes.byteLength} bytes. ` +
+      `Maximum allowed size is ${MAX_FILE_BYTES} bytes.`
+    );
+  }
+
+  let decodedContent;
+
+  try {
+    decodedContent =
+      new TextDecoder("utf-8", {
+        fatal: true
+      }).decode(bytes);
+  } catch {
+    throw new Error(
+      `${path} is not valid UTF-8 text.`
+    );
+  }
+
+  const digest =
+    await crypto.subtle.digest(
+      "SHA-256",
+      bytes
+    );
+
+  const sha256 =
+    bytesToHex(new Uint8Array(digest));
+
+  const lastByte =
+    bytes.byteLength > 0
+      ? bytes[bytes.byteLength - 1]
+      : null;
+
+  return {
+    protocol: "xinbaijin-file/1.0",
+    repository: `${owner}/${repo}`,
+    ref,
+    path,
+    encoding: "utf-8",
+
+    // GitHub 自己的 Blob SHA
+    github_blob_sha:
+      file.sha || "",
+
+    // 实际文件字节的 SHA-256
+    sha256,
+
+    byte_length:
+      bytes.byteLength,
+
+    has_trailing_newline:
+      lastByte === 0x0a ||
+      lastByte === 0x0d,
+
+    line_ending:
+      detectLineEnding(decodedContent),
+
+    content:
+      decodedContent
+  };
+}
+
 async function handleWebhook(request) {
   let body;
 
@@ -638,3 +973,5 @@ function jsonResponse(data, status = 200) {
     }
   });
 }
+
+
