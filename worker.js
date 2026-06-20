@@ -5,7 +5,8 @@ import { z } from "zod";
 import { Buffer } from "node:buffer";
 import { REPOSITORIES, DEFAULT_REPOSITORY, submitReview, getRepositoryConfig, githubHeaders } from "./review-core.js";
 
-export { REPOSITORY_PARAM } from "./mcp-schemas.js";
+import { REPOSITORY_PARAM, GET_LATEST_HANDOFF_SCHEMA, GET_PATCH_SCHEMA, SUBMIT_REVIEW_SCHEMA, GET_FILE_CONTENT_SCHEMA } from "./mcp-schemas.js";
+export { REPOSITORY_PARAM, GET_LATEST_HANDOFF_SCHEMA, GET_PATCH_SCHEMA, SUBMIT_REVIEW_SCHEMA, GET_FILE_CONTENT_SCHEMA };
 
 export default {
   async fetch(request, env, ctx) {
@@ -64,9 +65,7 @@ export function createServer(env) {
     {
       description:
         "读取目标仓库（必填）dev 分支的最新提交，并生成标准化 handoff。",
-      inputSchema: {
-        repository: REPOSITORY_PARAM
-      }
+      inputSchema: GET_LATEST_HANDOFF_SCHEMA
     },
     async ({ repository }) => {
       if (!repository) {
@@ -107,15 +106,7 @@ export function createServer(env) {
   "涉及转义符、引号、Unicode、Base64、JSON 格式、" +
   "文件末尾换行或编码问题时，不得仅根据 patch 下结论，" +
   "必须调用 get_file_content 核实原始源码。",
-  inputSchema: z.object({
-  repository: REPOSITORY_PARAM,
-  sha: z
-    .string()
-    .trim()
-    .min(7)
-    .optional()
-    .describe("可选提交 SHA；省略时读取 dev 分支最新提交。")
-}),
+  inputSchema: GET_PATCH_SCHEMA,
 outputSchema: {
   protocol: z.string(),
   repository: z.string(),
@@ -186,70 +177,7 @@ return {
     {
       description:
         "将 ChatGPT 的代码审查结果写入目标仓库（必填）dev 分支根目录 review.json。此工具只能写 review.json，不能修改源代码。",
-      inputSchema: z.object({
-        repository: REPOSITORY_PARAM,
-        commit: z
-          .string()
-          .regex(/^[0-9a-fA-F]{40}$/)
-          .describe("本次审查对应的完整 Git commit SHA。"),
-
-        verdict: z.enum([
-          "approved",
-          "changes_requested",
-          "blocked"
-        ]),
-
-        summary: z
-          .string()
-          .trim()
-          .min(1)
-          .max(10000),
-
-        findings: z
-          .array(
-            z.object({
-              severity: z.enum([
-                "critical",
-                "high",
-                "medium",
-                "low",
-                "info"
-              ]),
-
-              file: z
-                .string()
-                .trim()
-                .min(1)
-                .max(500),
-
-              line: z
-                .number()
-                .int()
-                .positive()
-                .nullable()
-                .optional(),
-
-              title: z
-                .string()
-                .trim()
-                .min(1)
-                .max(300),
-
-              description: z
-                .string()
-                .trim()
-                .min(1)
-                .max(5000),
-
-              recommendation: z
-                .string()
-                .trim()
-                .min(1)
-                .max(5000)
-            })
-          )
-          .max(100)
-      })
+      inputSchema: SUBMIT_REVIEW_SCHEMA
     },
     async ({ repository, ...input }) => {
       if (!repository) {
@@ -290,21 +218,7 @@ return {
         "当审查涉及转义符、引号、Unicode、Base64、JSON 格式、文件末尾换行或编码时，" +
         "必须调用此工具核实原始文件后才能形成 finding。",
 
-      inputSchema: {
-        repository: REPOSITORY_PARAM,
-
-        path: z
-          .string()
-          .trim()
-          .min(1)
-          .max(500)
-          .describe("仓库相对路径，例如 worker.js 或 src/index.js。"),
-
-        ref: z
-          .string()
-          .regex(/^[0-9a-fA-F]{40}$/)
-          .describe("要读取的完整 Git commit SHA。")
-      },
+      inputSchema: GET_FILE_CONTENT_SCHEMA,
 
       outputSchema: {
         protocol: z.literal("xinbaijin-file/1.0"),

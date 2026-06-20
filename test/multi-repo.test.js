@@ -1,49 +1,85 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { REPOSITORIES, getRepositoryConfig, submitReview } from "../review-core.js";
-import { REPOSITORY_PARAM } from "../mcp-schemas.js";
+import {
+  REPOSITORY_PARAM,
+  GET_LATEST_HANDOFF_SCHEMA,
+  GET_PATCH_SCHEMA,
+  SUBMIT_REVIEW_SCHEMA,
+  GET_FILE_CONTENT_SCHEMA
+} from "../mcp-schemas.js";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
-// Group 1: MCP public entry points reject missing repository (FIX 1)
+// Group 1: MCP tool schemas reject missing repository — uses production schemas
 // ---------------------------------------------------------------------------
 
 describe("MCP tool schemas require repository (no .optional())", () => {
-  it("get_latest_handoff schema rejects missing repository", () => {
-    const schema = z.object({ repository: REPOSITORY_PARAM });
-    const result = schema.safeParse({});
+  it("get_latest_handoff rejects missing repository", () => {
+    const result = z.object(GET_LATEST_HANDOFF_SCHEMA).safeParse({});
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues[0].path).toContain("repository");
     }
   });
 
-  it("get_patch schema rejects missing repository", () => {
-    const schema = z.object({ repository: REPOSITORY_PARAM });
-    const result = schema.safeParse({});
+  it("get_patch rejects missing repository", () => {
+    const result = GET_PATCH_SCHEMA.safeParse({});
     expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].path).toContain("repository");
+    }
   });
 
-  it("get_file_content schema rejects missing repository", () => {
-    const schema = z.object({ repository: REPOSITORY_PARAM });
-    const result = schema.safeParse({});
+  it("get_file_content rejects missing repository", () => {
+    const result = z.object(GET_FILE_CONTENT_SCHEMA).safeParse({});
     expect(result.success).toBe(false);
+    if (!result.success) {
+      const paths = result.error.issues.flatMap((i) => i.path);
+      expect(paths).toContain("repository");
+    }
   });
 
-  it("submit_review schema rejects missing repository", () => {
-    const schema = z.object({ repository: REPOSITORY_PARAM });
-    const result = schema.safeParse({});
+  it("submit_review rejects missing repository", () => {
+    const result = SUBMIT_REVIEW_SCHEMA.safeParse({});
     expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].path).toContain("repository");
+    }
   });
 
-  it("schema accepts valid repository value", () => {
-    const schema = z.object({ repository: REPOSITORY_PARAM });
-    const result = schema.safeParse({ repository: "xinbaijin" });
+  it("get_patch accepts valid repository plus optional sha", () => {
+    const result = GET_PATCH_SCHEMA.safeParse({ repository: "xinbaijin-mcp" });
     expect(result.success).toBe(true);
   });
 
-  it("schema rejects invalid repository values", () => {
-    const schema = z.object({ repository: REPOSITORY_PARAM });
-    const result = schema.safeParse({ repository: "evil-repo" });
+  it("submit_review accepts valid repository plus required fields", () => {
+    const result = SUBMIT_REVIEW_SCHEMA.safeParse({
+      repository: "xinbaijin",
+      commit: "a".repeat(40),
+      verdict: "approved",
+      summary: "Looks good",
+      findings: []
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("get_file_content accepts valid path, ref, and repository", () => {
+    const result = z.object(GET_FILE_CONTENT_SCHEMA).safeParse({
+      path: "src/index.js",
+      ref: "a".repeat(40),
+      repository: "xinbaijin-mcp"
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("submit_review rejects invalid repository values", () => {
+    const result = SUBMIT_REVIEW_SCHEMA.safeParse({
+      repository: "evil-repo",
+      commit: "a".repeat(40),
+      verdict: "approved",
+      summary: "Nope",
+      findings: []
+    });
     expect(result.success).toBe(false);
   });
 });
