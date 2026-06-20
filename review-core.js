@@ -1,3 +1,4 @@
+// 白名单仓库配置 — 唯一入口，所有仓库解析必须经过此处
 const REPOSITORIES = Object.freeze({
   xinbaijin: {
     owner: "shunhang776",
@@ -15,19 +16,19 @@ const DEFAULT_REPOSITORY = "xinbaijin";
 
 function getRepositoryConfig(env, repositoryName) {
   const name = repositoryName || DEFAULT_REPOSITORY;
-  const config = REPOSITORIES[name];
+  const repoConfig = REPOSITORIES[name];
 
-  if (!config) {
+  if (!repoConfig) {
     throw new Error(
       `Unknown repository: "${name}". ` +
-      `Allowed repositories: ${Object.keys(REPOSITORIES).sort().join(", ")}.`
+      `Allowed: ${Object.keys(REPOSITORIES).join(", ")}`
     );
   }
 
   return {
-    owner: config.owner,
-    repo: config.repo,
-    branch: config.branch,
+    owner: repoConfig.owner,
+    repo: repoConfig.repo,
+    branch: repoConfig.branch,
     token: env.GITHUB_TOKEN
   };
 }
@@ -269,6 +270,7 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
       );
   }
 }
+
 async function getExistingReviewFileSha(env, repositoryName) {
   const { owner, repo, branch, token } =
     getRepositoryConfig(env, repositoryName);
@@ -497,7 +499,8 @@ async function submitReview(env, input, repositoryName) {
     );
   }
 
-  // 固定本次写入所基于的分支头。后续所有校验和提交都基于这个不可变 SHA。
+  // 固定本次写入所基于的分支头。后续所有校验和提交都基于这个不可变 SHA，
+  // 全部使用同一个 repositoryName，禁止跨仓库读写。
   const branchHead =
     await getBranchHeadSha(env, repositoryName);
 
@@ -573,11 +576,12 @@ async function submitReview(env, input, repositoryName) {
     message: "review.json updated successfully"
   };
 }
+
 export {
+  REPOSITORIES,
+  DEFAULT_REPOSITORY,
+  getRepositoryConfig,
   submitReview,
   getLatestReviewableCommit,
-  getRepositoryConfig,
-  githubHeaders,
-  REPOSITORIES,
-  DEFAULT_REPOSITORY
+  githubHeaders
 };
