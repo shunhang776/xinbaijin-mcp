@@ -3,10 +3,10 @@
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
   "reviewed_commit": "cf03aa8adc65720672d1bd010ba622653cfc7b30",
-  "based_on_branch_head": "cf03aa8adc65720672d1bd010ba622653cfc7b30",
+  "based_on_branch_head": "3bd45f70512548d8a80f3d51e5658fb55fa0efca",
   "verdict": "approved",
-  "summary": "并发保护写回路径冒烟测试：已验证部署后的 submit_review 能基于固定分支头创建审查提交，并通过非强制 fast-forward 更新 dev。",
+  "summary": "并发写入修复部署后验证通过：submit_review 已切换为基于固定分支头的 Git Data API 写入路径，review.json 写入结果应包含 based_on_branch_head，用于证明审查结果绑定到提交时的分支头。",
   "findings": [],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-20T11:11:08.391Z"
+  "reviewed_at": "2026-06-20T11:12:35.036Z"
 }
