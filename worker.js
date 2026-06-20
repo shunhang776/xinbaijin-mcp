@@ -1,77 +1,216 @@
+﻿import { createMcpHandler } from "agents/mcp";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+const DEFAULT_OWNER = "shunhang776";
+const DEFAULT_REPO = "xinbaijin-mcp";
+const DEFAULT_BRANCH = "dev";
+
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+
+    // ChatGPT MCP 连接入口
+    if (url.pathname === "/mcp") {
+      const server = createServer(env);
+
+      return createMcpHandler(server, {
+        route: "/mcp"
+      })(request, env, ctx);
+    }
+
     // 浏览器健康检查
-    if (request.method === "GET") {
+    if (request.method === "GET" && url.pathname === "/") {
       return jsonResponse({
         ok: true,
         service: "xinbaijin-mcp",
-        role: "gateway",
-        status: "running"
+        role: "gateway-and-mcp",
+        status: "running",
+        mcp_endpoint: "/mcp"
       });
     }
 
-    // 只接受 POST Webhook
-    if (request.method !== "POST") {
+    // GitHub Webhook 入口
+    if (
+      request.method === "POST" &&
+      (url.pathname === "/" || url.pathname === "/webhook")
+    ) {
+      return handleWebhook(request);
+    }
+
+    if (request.method !== "GET" && request.method !== "POST") {
       return jsonResponse(
         { ok: false, error: "Method not allowed" },
         405
       );
     }
 
-    let body;
-
-    try {
-      body = await request.json();
-    } catch {
-      return jsonResponse(
-        { ok: false, error: "Invalid JSON body" },
-        400
-      );
-    }
-
-    const githubEvent =
-      request.headers.get("X-GitHub-Event") || "unknown";
-
-    const ref = body.ref || "";
-    const branch = ref.startsWith("refs/heads/")
-      ? ref.substring("refs/heads/".length)
-      : null;
-
-    const commits = Array.isArray(body.commits)
-      ? body.commits
-      : [];
-
-    const latestCommit =
-      body.head_commit ||
-      commits[commits.length - 1] ||
-      null;
-
-    // Worker 只把 GitHub 数据转换为统一 handoff
-    const handoff = {
-      protocol: "xinbaijin-handoff/1.0",
-      event: githubEvent,
-      repository: body.repository?.full_name || null,
-      branch,
-      commit: body.after || latestCommit?.id || null,
-      message: latestCommit?.message || null,
-      author:
-        latestCommit?.author?.username ||
-        latestCommit?.author?.name ||
-        null,
-      changed_files: {
-        added: latestCommit?.added || [],
-        modified: latestCommit?.modified || [],
-        removed: latestCommit?.removed || []
-      },
-      status: "ready_for_review"
-    };
-
-    return jsonResponse({
-      ok: true,
-      handoff
-    });
+    return jsonResponse(
+      { ok: false, error: "Not found" },
+      404
+    );
   }
 };
+
+function createServer(env) {
+  const server = new McpServer({
+    name: "xinbaijin-mcp",
+    version: "1.0.0"
+  });
+
+  server.registerTool(
+    "get_latest_handoff",
+    {
+      description:
+        "读取 xinbaijin-mcp 仓库 dev 分支的最新提交，并生成标准化 handoff。",
+      inputSchema: {}
+    },
+    async () => {
+      try {
+        const handoff = await getLatestHandoff(env);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(handoff, null, 2)
+            }
+          ]
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: error instanceof Error
+                ? error.message
+                : String(error)
+            }
+          ]
+        };
+      }
+    }
+  );
+
+  return server;
+}
+
+async function getLatestHandoff(env) {
+  const owner = env.GITHUB_OWNER || DEFAULT_OWNER;
+  const repo = env.GITHUB_REPO || DEFAULT_REPO;
+  const branch = env.GITHUB_BRANCH || DEFAULT_BRANCH;
+  const token = env.GITHUB_TOKEN;
+
+  if (!token) {
+    throw new Error(
+      "GITHUB_TOKEN is not configured in Cloudflare Worker secrets."
+    );
+  }
+
+  const endpoint =
+    `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`;
+
+  const response = await fetch(endpoint, {
+    headers: {
+      "accept": "application/vnd.github+json",
+      "authorization": `Bearer ${token}`,
+      "user-agent": "xinbaijin-mcp-worker",
+      "x-github-api-version": "2022-11-28"
+    }
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+
+    throw new Error(
+      `GitHub API request failed: ${response.status} ${details}`
+    );
+  }
+
+  const commit = await response.json();
+  const files = Array.isArray(commit.files) ? commit.files : [];
+
+  return {
+    protocol: "xinbaijin-handoff/1.0",
+    event: "code_changed",
+    repository: `${owner}/${repo}`,
+    branch,
+    commit: commit.sha || null,
+    message: commit.commit?.message || null,
+    author:
+      commit.author?.login ||
+      commit.commit?.author?.name ||
+      null,
+    changed_files: {
+      added: files
+        .filter((file) => file.status === "added")
+        .map((file) => file.filename),
+      modified: files
+        .filter((file) =>
+          ["modified", "renamed", "changed", "copied"].includes(file.status)
+        )
+        .map((file) => file.filename),
+      removed: files
+        .filter((file) => file.status === "removed")
+        .map((file) => file.filename)
+    },
+    status: "ready_for_review"
+  };
+}
+
+async function handleWebhook(request) {
+  let body;
+
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse(
+      { ok: false, error: "Invalid JSON body" },
+      400
+    );
+  }
+
+  const githubEvent =
+    request.headers.get("X-GitHub-Event") || "unknown";
+
+  const ref = body.ref || "";
+  const branch = ref.startsWith("refs/heads/")
+    ? ref.substring("refs/heads/".length)
+    : null;
+
+  const commits = Array.isArray(body.commits)
+    ? body.commits
+    : [];
+
+  const latestCommit =
+    body.head_commit ||
+    commits[commits.length - 1] ||
+    null;
+
+  const handoff = {
+    protocol: "xinbaijin-handoff/1.0",
+    event: githubEvent,
+    repository: body.repository?.full_name || null,
+    branch,
+    commit: body.after || latestCommit?.id || null,
+    message: latestCommit?.message || null,
+    author:
+      latestCommit?.author?.username ||
+      latestCommit?.author?.name ||
+      null,
+    changed_files: {
+      added: latestCommit?.added || [],
+      modified: latestCommit?.modified || [],
+      removed: latestCommit?.removed || []
+    },
+    status: "ready_for_review"
+  };
+
+  return jsonResponse({
+    ok: true,
+    handoff
+  });
+}
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
