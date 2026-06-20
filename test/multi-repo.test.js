@@ -91,12 +91,8 @@ describe("MCP tool schemas require repository (no .optional())", () => {
 describe("getRepositoryConfig", () => {
   const mockEnv = { GITHUB_TOKEN: "test-token" };
 
-  it("resolves xinbaijin when repository is omitted (internal default preserved)", () => {
-    const config = getRepositoryConfig(mockEnv);
-    expect(config.owner).toBe("shunhang776");
-    expect(config.repo).toBe("xinbaijin");
-    expect(config.branch).toBe("dev");
-    expect(config.token).toBe("test-token");
+  it("rejects when repository is omitted", () => {
+    expect(() => getRepositoryConfig(mockEnv)).toThrow(/repository is required/);
   });
 
   it("resolves xinbaijin-mcp when explicitly passed", () => {
@@ -112,11 +108,10 @@ describe("getRepositoryConfig", () => {
     );
   });
 
-  it("treats empty string as omitted and falls back to default", () => {
-    const config = getRepositoryConfig(mockEnv, "");
-    expect(config.owner).toBe("shunhang776");
-    expect(config.repo).toBe("xinbaijin");
-    expect(config.branch).toBe("dev");
+  it("rejects undefined/null/empty repositoryName", () => {
+    expect(() => getRepositoryConfig(mockEnv, undefined)).toThrow(/repository is required/);
+    expect(() => getRepositoryConfig(mockEnv, null)).toThrow(/repository is required/);
+    expect(() => getRepositoryConfig(mockEnv, "")).toThrow(/repository is required/);
   });
 });
 
@@ -303,27 +298,34 @@ describe("submitReview uses single repository for entire call chain", () => {
   });
 
   it("concurrent branch update is rejected", async () => {
-    let branchHeadCalls = 0;
+    // submitReview calls getBranchHeadSha + updateBranchRefFastForward
+    // which re-reads branch head before PATCH. GET returns valid SHA;
+    // the PATCH (/git/refs/heads/) returns 422.
+    let patchForceCorrect = false;
 
-    vi.stubGlobal("fetch", vi.fn(async (url) => {
+    vi.stubGlobal("fetch", vi.fn(async (url, options) => {
       const urlStr = String(url);
-      const isBranchEndpoint =
-        urlStr.includes("/git/ref/heads/") ||
-        urlStr.includes("/git/refs/heads/");
 
-      if (isBranchEndpoint) {
-        branchHeadCalls++;
-        if (branchHeadCalls === 1) {
-          return new Response(
-            JSON.stringify({ object: { sha: "f".repeat(40) } }),
-            { status: 200 }
-          );
+      // GET branch head (no "s" after ref) — always succeeds
+      if (urlStr.includes("/git/ref/heads/dev") && !urlStr.includes("refs")) {
+        return new Response(
+          JSON.stringify({ object: { sha: "f".repeat(40) } }),
+          { status: 200 }
+        );
+      }
+
+      // PATCH branch ref (with "s") — simulates concurrent update
+      if (urlStr.includes("/git/refs/heads/dev")) {
+        if (options && options.body) {
+          const body = JSON.parse(options.body);
+          patchForceCorrect = body.force === false;
         }
         return new Response(
           JSON.stringify({ message: "Reference update failed" }),
           { status: 422 }
         );
       }
+
       if (urlStr.includes("/commits/")) {
         return new Response(
           JSON.stringify(makeMockCommit("f".repeat(40), "tree-sha", false)),
@@ -367,6 +369,77 @@ describe("submitReview uses single repository for entire call chain", () => {
         "xinbaijin"
       )
     ).rejects.toThrow(/Concurrent branch update detected/);
+    expect(patchForceCorrect).toBe(true);
+  });
+
+  it("submitReview rejects undefined repository", async () => {
+    await expect(
+      submitReview(
+        { GITHUB_TOKEN: "test-token" },
+        {
+          commit: "b".repeat(40),
+          verdict: "approved",
+          summary: "No repo",
+          findings: []
+        },
+        undefined
+      )
+    ).rejects.toThrow(/repository is required/);
+  });
+
+  it("rejects when branch head changes between read and write", async () => {
+    // getBranchHeadSha called twice: initial read + pre-PATCH re-read.
+    // First returns one SHA, second returns a different one — code detects
+    // mismatch and throws before the actual PATCH.
+    const firstSha = "a".repeat(40);
+    const changedSha = "b".repeat(40);
+    let getCallCount = 0;
+
+    vi.stubGlobal("fetch", vi.fn(async (url, options) => {
+      const urlStr = String(url);
+
+      // GET /git/ref/heads/dev (no "s") — branch head reads
+      if (urlStr.includes("/git/ref/heads/dev") && !urlStr.includes("refs")) {
+        getCallCount++;
+        const sha = getCallCount === 1 ? firstSha : changedSha;
+        return new Response(
+          JSON.stringify({ object: { sha } }),
+          { status: 200 }
+        );
+      }
+
+      // The PATCH /git/refs/heads/dev should never be reached
+      if (urlStr.includes("/git/refs/heads/dev")) {
+        return new Response("unreachable", { status: 200 });
+      }
+
+      if (urlStr.includes("/commits/")) {
+        return new Response(JSON.stringify({
+          sha: firstSha,
+          commit: { tree: { sha: "da".repeat(20) }, message: "feat: some code" },
+          parents: [{ sha: "0".repeat(40) }],
+          files: [{ filename: "src/app.js" }]
+        }), { status: 200 });
+      }
+      if (urlStr.includes("/git/blobs")) {
+        return new Response(JSON.stringify({ sha: "bb".repeat(20) }), { status: 201 });
+      }
+      if (urlStr.includes("/git/trees")) {
+        return new Response(JSON.stringify({ sha: "cc".repeat(20) }), { status: 201 });
+      }
+      if (urlStr.includes("/git/commits") && !urlStr.includes("/commits/") && !urlStr.includes("/git/ref")) {
+        return new Response(JSON.stringify({ sha: "dd".repeat(20) }), { status: 201 });
+      }
+      return new Response("{}", { status: 200 });
+    }));
+
+    await expect(
+      submitReview(
+        { GITHUB_TOKEN: "test" },
+        { commit: firstSha, verdict: "approved", summary: "Race", findings: [] },
+        "xinbaijin"
+      )
+    ).rejects.toThrow(/Concurrent branch update/);
   });
 });
 
@@ -511,6 +584,85 @@ describe("submitReview cross-repo isolation with review-only branch head", () =>
     compareCalls.forEach((u) =>
       expect(u).toContain("shunhang776/xinbaijin-mcp")
     );
+  });
+
+  it("rejects fast path when non-review-only commit sits between head and candidate", async () => {
+    // History: codeSha (old code) -> midCodeSha (newer code!) -> reviewSha (review-only pointing to OLD codeSha)
+    // The fast path should detect midCodeSha is non-review-only and fall through to walking,
+    // ultimately finding midCodeSha as the latest code commit, NOT codeSha.
+    const codeSha = "1".repeat(40);
+    const midCodeSha = "2".repeat(40);
+    const reviewSha = "3".repeat(40);
+    const urls = [];
+
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      const urlStr = String(url);
+      urls.push(urlStr);
+
+      if (urlStr.includes("/git/ref/heads/dev")) {
+        return new Response(JSON.stringify({ object: { sha: reviewSha } }), { status: 200 });
+      }
+      if (urlStr.includes("/commits/" + reviewSha)) {
+        return new Response(JSON.stringify({
+          sha: reviewSha,
+          commit: { tree: { sha: "rt" }, message: "chore(review): approved " + codeSha.slice(0,7) + " [skip-review]" },
+          parents: [{ sha: midCodeSha }],
+          files: [{ filename: "review.json" }]
+        }), { status: 200 });
+      }
+      if (urlStr.includes("/contents/review.json")) {
+        return new Response(JSON.stringify({
+          type: "file", encoding: "base64",
+          content: btoa(JSON.stringify({ reviewed_commit: codeSha }))
+        }), { status: 200 });
+      }
+      if (urlStr.includes("/compare/")) {
+        return new Response(JSON.stringify({ status: "ahead" }), { status: 200 });
+      }
+      if (urlStr.includes("/commits/" + codeSha)) {
+        return new Response(JSON.stringify({
+          sha: codeSha,
+          commit: { tree: { sha: "ct" }, message: "feat: old code" },
+          parents: [{ sha: "0".repeat(40) }],
+          files: [{ filename: "src/old.js" }]
+        }), { status: 200 });
+      }
+      if (urlStr.includes("/commits/" + midCodeSha)) {
+        return new Response(JSON.stringify({
+          sha: midCodeSha,
+          commit: { tree: { sha: "mt" }, message: "feat: newer code" },
+          parents: [{ sha: codeSha }],
+          files: [{ filename: "src/new.js" }]
+        }), { status: 200 });
+      }
+      if (urlStr.includes("/git/blobs")) {
+        return new Response(JSON.stringify({ sha: "bx" }), { status: 201 });
+      }
+      if (urlStr.includes("/git/trees")) {
+        return new Response(JSON.stringify({ sha: "tx" }), { status: 201 });
+      }
+      if (urlStr.includes("/git/commits") && !urlStr.includes("/commits/") && !urlStr.includes("/git/ref")) {
+        return new Response(JSON.stringify({ sha: "4".repeat(40) }), { status: 201 });
+      }
+      if (urlStr.includes("/git/refs/heads/")) {
+        return new Response(JSON.stringify({ ref: "refs/heads/dev" }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }));
+
+    // Submit with the OLD codeSha — should be rejected as stale
+    // because the actual latest code commit is midCodeSha
+    await expect(
+      submitReview(
+        { GITHUB_TOKEN: "test" },
+        { commit: codeSha, verdict: "approved", summary: "Stale fast path", findings: [] },
+        "xinbaijin-mcp"
+      )
+    ).rejects.toThrow(/Stale review rejected/);
+
+    // Verify the walking path found midCodeSha
+    const midCodeCalls = urls.filter(u => u.includes("/commits/" + midCodeSha));
+    expect(midCodeCalls.length).toBeGreaterThanOrEqual(1);
   });
 });
 

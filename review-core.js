@@ -15,7 +15,12 @@ const REPOSITORIES = Object.freeze({
 const DEFAULT_REPOSITORY = "xinbaijin";
 
 function getRepositoryConfig(env, repositoryName) {
-  const name = repositoryName || DEFAULT_REPOSITORY;
+  if (!repositoryName) {
+    throw new Error(
+      "repository is required. Choose xinbaijin or xinbaijin-mcp."
+    );
+  }
+  const name = repositoryName;
   const repoConfig = REPOSITORIES[name];
 
   if (!repoConfig) {
@@ -217,10 +222,44 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
         );
 
       if (
-        reachable &&
-        !isReviewOnlyCommit(candidate)
+        !reachable ||
+        isReviewOnlyCommit(candidate)
       ) {
-        return candidate;
+        // Fall through to parent traversal.
+      } else {
+        // Verify every commit between branch head and candidate
+        // is review-only. If any non-review-only commit sits between
+        // them, the candidate is stale and we must walk parents.
+        let walker = commit;
+        const walkVisited = new Set();
+        let fastPathValid = true;
+
+        while (true) {
+          const walkerSha = String(walker.sha || "").toLowerCase();
+          if (walkerSha === reviewedCommit) break; // reached candidate
+          if (!walkerSha || walkVisited.has(walkerSha)) {
+            fastPathValid = false;
+            break;
+          }
+          walkVisited.add(walkerSha);
+
+          if (!isReviewOnlyCommit(walker)) {
+            fastPathValid = false;
+            break;
+          }
+
+          const walkerParent = walker.parents?.[0]?.sha;
+          if (!walkerParent) {
+            fastPathValid = false;
+            break;
+          }
+
+          walker = await getCommitDetails(env, walkerParent, repositoryName);
+        }
+
+        if (fastPathValid) {
+          return candidate;
+        }
       }
     } catch {
       // Fall back to parent traversal below.
@@ -450,10 +489,23 @@ async function createReviewGitCommit(
 async function updateBranchRefFastForward(
   env,
   newCommitSha,
+  expectedParentSha,
   repositoryName
 ) {
   const { owner, repo, branch, token } =
     getRepositoryConfig(env, repositoryName);
+
+  // Defense-in-depth: re-read branch head immediately before PATCH.
+  // Shrinks the race window. Combined with force:false this ensures
+  // the new commit is a descendant of the current tip.
+  const currentHead = await getBranchHeadSha(env, repositoryName);
+
+  if (currentHead !== expectedParentSha) {
+    throw new Error(
+      "Concurrent branch update detected. The review was not published. " +
+      "Run get_latest_handoff and get_patch again before resubmitting."
+    );
+  }
 
   const endpoint =
     `https://api.github.com/repos/${owner}/${repo}` +
@@ -559,6 +611,7 @@ async function submitReview(env, input, repositoryName) {
   await updateBranchRefFastForward(
     env,
     created.commitSha,
+    branchHead,
     repositoryName
   );
 
