@@ -88,24 +88,68 @@ describe("Worker smoke test", () => {
     }
   });
 
-  it("tool handlers accept repository and do not throw on valid input", async () => {
+  it("get_latest_handoff handler returns structured result with repository", async () => {
     createServer({ GITHUB_TOKEN: "test-token" });
-    for (const tool of registeredTools) {
-      const handler = tool.handler;
-      expect(typeof handler, `handler for "${tool.name}" is not a function`).toBe("function");
+    const tools = Object.fromEntries(registeredTools.map((t) => [t.name, t.handler]));
+    const handoffHandler = tools["get_latest_handoff"];
+    expect(typeof handoffHandler).toBe("function");
 
-      // Each handler should be callable with at least repository.
-      // All real failures (missing env/token, fetch rejections) are caught
-      // by the handler's try/catch and returned as { isError: true, ... }.
-      // The only unacceptable failure is a ReferenceError / "is not defined".
-      try {
-        await handler({ repository: "xinbaijin" });
-      } catch (e) {
-        expect(
-          e.message,
-          `handler for "${tool.name}" threw: ${e.message}`
-        ).not.toMatch(/is not defined/);
-      }
+    try {
+      const result = await handoffHandler({ repository: "xinbaijin" });
+      // Since fetch is mocked to reject, the handler's try/catch should
+      // return an error object rather than throwing.
+      expect(typeof result).toBe("object");
+      expect(result).not.toBeNull();
+    } catch (e) {
+      // Only fail if a ReferenceError / "is not defined" slipped through
+      expect(e.message, `get_latest_handoff threw ReferenceError: ${e.message}`).not.toMatch(
+        /is not defined/
+      );
+    }
+  });
+
+  it("submit_review handler validates with complete input", async () => {
+    createServer({ GITHUB_TOKEN: "test-token" });
+    const tools = Object.fromEntries(registeredTools.map((t) => [t.name, t.handler]));
+    const submitHandler = tools["submit_review"];
+    expect(typeof submitHandler).toBe("function");
+
+    try {
+      const result = await submitHandler({
+        repository: "xinbaijin",
+        commit: "a".repeat(40),
+        verdict: "approved",
+        summary: "test",
+        findings: []
+      });
+      // Any structured return is acceptable (error or success)
+      expect(typeof result).toBe("object");
+      expect(result).not.toBeNull();
+    } catch (e) {
+      expect(e.message, `submit_review threw ReferenceError: ${e.message}`).not.toMatch(
+        /is not defined/
+      );
+    }
+  });
+
+  it("get_file_content handler validates with complete input", async () => {
+    createServer({ GITHUB_TOKEN: "test-token" });
+    const tools = Object.fromEntries(registeredTools.map((t) => [t.name, t.handler]));
+    const fileHandler = tools["get_file_content"];
+    expect(typeof fileHandler).toBe("function");
+
+    try {
+      const result = await fileHandler({
+        repository: "xinbaijin-mcp",
+        path: "src/index.js",
+        ref: "a".repeat(40)
+      });
+      expect(typeof result).toBe("object");
+      expect(result).not.toBeNull();
+    } catch (e) {
+      expect(e.message, `get_file_content threw ReferenceError: ${e.message}`).not.toMatch(
+        /is not defined/
+      );
     }
   });
 });
