@@ -2,6 +2,7 @@
 import { createMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { Buffer } from "node:buffer";
 
 const DEFAULT_OWNER = "shunhang776";
 const DEFAULT_REPO = "xinbaijin-mcp";
@@ -117,6 +118,103 @@ function createServer(env) {
             {
               type: "text",
               text: JSON.stringify(patch, null, 2)
+            }
+          ]
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text:
+                error instanceof Error
+                  ? error.message
+                  : String(error)
+            }
+          ]
+        };
+      }
+    }
+  );
+  server.registerTool(
+    "submit_review",
+    {
+      description:
+        "将 ChatGPT 的代码审查结果写入 dev 分支根目录 review.json。此工具只能写 review.json，不能修改源代码。",
+      inputSchema: z.object({
+        commit: z
+          .string()
+          .regex(/^[0-9a-fA-F]{40}$/)
+          .describe("本次审查对应的完整 Git commit SHA。"),
+
+        verdict: z.enum([
+          "approved",
+          "changes_requested",
+          "blocked"
+        ]),
+
+        summary: z
+          .string()
+          .trim()
+          .min(1)
+          .max(10000),
+
+        findings: z
+          .array(
+            z.object({
+              severity: z.enum([
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info"
+              ]),
+
+              file: z
+                .string()
+                .trim()
+                .min(1)
+                .max(500),
+
+              line: z
+                .number()
+                .int()
+                .positive()
+                .nullable()
+                .optional(),
+
+              title: z
+                .string()
+                .trim()
+                .min(1)
+                .max(300),
+
+              description: z
+                .string()
+                .trim()
+                .min(1)
+                .max(5000),
+
+              recommendation: z
+                .string()
+                .trim()
+                .min(1)
+                .max(5000)
+            })
+          )
+          .max(100)
+      })
+    },
+    async (input) => {
+      try {
+        const result = await submitReview(env, input);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
             }
           ]
         };
@@ -269,6 +367,212 @@ async function getPatch(env, requestedSha) {
           ? file.patch
           : null
     }))
+  };
+}
+
+function getRepositoryConfig(env) {
+  return {
+    owner: env.GITHUB_OWNER || DEFAULT_OWNER,
+    repo: env.GITHUB_REPO || DEFAULT_REPO,
+    branch: env.GITHUB_BRANCH || DEFAULT_BRANCH,
+    token: env.GITHUB_TOKEN
+  };
+}
+
+function githubHeaders(token) {
+  return {
+    accept: "application/vnd.github+json",
+    authorization: `Bearer ${token}`,
+    "content-type": "application/json",
+    "user-agent": "xinbaijin-mcp-worker",
+    "x-github-api-version": "2022-11-28"
+  };
+}
+
+async function getCommitDetails(env, ref) {
+  const { owner, repo, token } = getRepositoryConfig(env);
+
+  if (!token) {
+    throw new Error(
+      "GITHUB_TOKEN is not configured in Cloudflare Worker secrets."
+    );
+  }
+
+  const endpoint =
+    `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`;
+
+  const response = await fetch(endpoint, {
+    headers: githubHeaders(token)
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+
+    throw new Error(
+      `GitHub commit request failed: ${response.status} ${details}`
+    );
+  }
+
+  return response.json();
+}
+
+async function getLatestReviewableCommit(env) {
+  const { branch } = getRepositoryConfig(env);
+
+  let ref = branch;
+
+  for (let index = 0; index < 20; index += 1) {
+    const commit = await getCommitDetails(env, ref);
+
+    const files = Array.isArray(commit.files)
+      ? commit.files
+      : [];
+
+    const isReviewOnlyCommit =
+      files.length > 0 &&
+      files.every((file) => file.filename === "review.json");
+
+    if (!isReviewOnlyCommit) {
+      return commit;
+    }
+
+    const parentSha = commit.parents?.[0]?.sha;
+
+    if (!parentSha) {
+      break;
+    }
+
+    ref = parentSha;
+  }
+
+  throw new Error(
+    "Unable to locate the latest reviewable code commit."
+  );
+}
+
+async function getExistingReviewFileSha(env) {
+  const { owner, repo, branch, token } =
+    getRepositoryConfig(env);
+
+  const endpoint =
+    `https://api.github.com/repos/${owner}/${repo}/contents/review.json` +
+    `?ref=${encodeURIComponent(branch)}`;
+
+  const response = await fetch(endpoint, {
+    headers: githubHeaders(token)
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    const details = await response.text();
+
+    throw new Error(
+      `Unable to read existing review.json: ${response.status} ${details}`
+    );
+  }
+
+  const file = await response.json();
+
+  return file.sha || null;
+}
+
+async function submitReview(env, input) {
+  const { owner, repo, branch, token } =
+    getRepositoryConfig(env);
+
+  if (!token) {
+    throw new Error(
+      "GITHUB_TOKEN is not configured in Cloudflare Worker secrets."
+    );
+  }
+
+  const latestCodeCommit =
+    await getLatestReviewableCommit(env);
+
+  const expectedCommit =
+    String(latestCodeCommit.sha || "").toLowerCase();
+
+  const submittedCommit =
+    input.commit.toLowerCase();
+
+  if (submittedCommit !== expectedCommit) {
+    throw new Error(
+      `Stale review rejected. Expected latest code commit ${expectedCommit}, ` +
+      `but received ${submittedCommit}. Run get_latest_handoff and get_patch again.`
+    );
+  }
+
+  const review = {
+    protocol: "xinbaijin-review/1.0",
+    repository: `${owner}/${repo}`,
+    branch,
+    reviewed_commit: expectedCommit,
+    verdict: input.verdict,
+    summary: input.summary,
+    findings: input.findings,
+    reviewer: "ChatGPT",
+    reviewed_at: new Date().toISOString()
+  };
+
+  const reviewText =
+    `${JSON.stringify(review, null, 2)}\n`;
+
+  const encodedContent =
+    Buffer.from(reviewText, "utf8").toString("base64");
+
+  const existingFileSha =
+    await getExistingReviewFileSha(env);
+
+  const requestBody = {
+    message:
+      `chore(review): ${input.verdict} ` +
+      `${expectedCommit.slice(0, 7)} [skip-review]`,
+    content: encodedContent,
+    branch
+  };
+
+  if (existingFileSha) {
+    requestBody.sha = existingFileSha;
+  }
+
+  const endpoint =
+    `https://api.github.com/repos/${owner}/${repo}/contents/review.json`;
+
+  const response = await fetch(endpoint, {
+    method: "PUT",
+    headers: githubHeaders(token),
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+
+    throw new Error(
+      `Unable to write review.json: ${response.status} ${details}`
+    );
+  }
+
+  const result = await response.json();
+
+  return {
+    ok: true,
+    protocol: review.protocol,
+    repository: review.repository,
+    branch,
+    path: "review.json",
+    reviewed_commit: expectedCommit,
+    verdict: input.verdict,
+    review_commit:
+      result.commit?.sha || null,
+    file_sha:
+      result.content?.sha || null,
+    message:
+      existingFileSha
+        ? "review.json updated successfully"
+        : "review.json created successfully"
   };
 }
 
