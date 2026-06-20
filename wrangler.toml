@@ -1,3 +1,4 @@
-name = "xinbaijin-mcp"
+﻿name = "xinbaijin-mcp"
 main = "worker.js"
-compatibility_date = "2026-06-19"
+compatibility_date = "2026-06-20"
+compatibility_flags = ["nodejs_compat"]
