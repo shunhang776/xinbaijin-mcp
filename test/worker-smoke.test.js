@@ -88,68 +88,74 @@ describe("Worker smoke test", () => {
     }
   });
 
-  it("get_latest_handoff handler returns structured result with repository", async () => {
+  it("get_latest_handoff handler returns error result with mock fetch", async () => {
     createServer({ GITHUB_TOKEN: "test-token" });
-    const tools = Object.fromEntries(registeredTools.map((t) => [t.name, t.handler]));
-    const handoffHandler = tools["get_latest_handoff"];
-    expect(typeof handoffHandler).toBe("function");
+    const handler = registeredTools.find((t) => t.name === "get_latest_handoff").handler;
+    expect(typeof handler).toBe("function");
 
-    try {
-      const result = await handoffHandler({ repository: "xinbaijin" });
-      // Since fetch is mocked to reject, the handler's try/catch should
-      // return an error object rather than throwing.
-      expect(typeof result).toBe("object");
-      expect(result).not.toBeNull();
-    } catch (e) {
-      // Only fail if a ReferenceError / "is not defined" slipped through
-      expect(e.message, `get_latest_handoff threw ReferenceError: ${e.message}`).not.toMatch(
-        /is not defined/
-      );
-    }
+    const result = await handler({ repository: "xinbaijin" });
+
+    expect(typeof result).toBe("object");
+    expect(result).not.toBeNull();
+    expect(
+      result.isError === true || result.content !== undefined,
+      "handler must return error result with isError or content"
+    ).toBe(true);
+    expect(result.ok).not.toBe(true);
   });
 
-  it("submit_review handler validates with complete input", async () => {
+  it("get_patch handler returns error result with mock fetch", async () => {
     createServer({ GITHUB_TOKEN: "test-token" });
-    const tools = Object.fromEntries(registeredTools.map((t) => [t.name, t.handler]));
-    const submitHandler = tools["submit_review"];
-    expect(typeof submitHandler).toBe("function");
+    const handler = registeredTools.find((t) => t.name === "get_patch").handler;
+    expect(typeof handler).toBe("function");
 
-    try {
-      const result = await submitHandler({
-        repository: "xinbaijin",
-        commit: "a".repeat(40),
-        verdict: "approved",
-        summary: "test",
-        findings: []
-      });
-      // Any structured return is acceptable (error or success)
-      expect(typeof result).toBe("object");
-      expect(result).not.toBeNull();
-    } catch (e) {
-      expect(e.message, `submit_review threw ReferenceError: ${e.message}`).not.toMatch(
-        /is not defined/
-      );
-    }
+    const result = await handler({ repository: "xinbaijin-mcp" });
+
+    expect(typeof result).toBe("object");
+    expect(result).not.toBeNull();
+    expect(
+      result.isError === true || result.content !== undefined,
+      "handler must return error result with isError or content"
+    ).toBe(true);
   });
 
-  it("get_file_content handler validates with complete input", async () => {
+  it("get_file_content handler returns error result with mock fetch", async () => {
     createServer({ GITHUB_TOKEN: "test-token" });
-    const tools = Object.fromEntries(registeredTools.map((t) => [t.name, t.handler]));
-    const fileHandler = tools["get_file_content"];
-    expect(typeof fileHandler).toBe("function");
+    const handler = registeredTools.find((t) => t.name === "get_file_content").handler;
+    expect(typeof handler).toBe("function");
 
-    try {
-      const result = await fileHandler({
-        repository: "xinbaijin-mcp",
-        path: "src/index.js",
-        ref: "a".repeat(40)
-      });
-      expect(typeof result).toBe("object");
-      expect(result).not.toBeNull();
-    } catch (e) {
-      expect(e.message, `get_file_content threw ReferenceError: ${e.message}`).not.toMatch(
-        /is not defined/
-      );
-    }
+    const result = await handler({
+      repository: "xinbaijin-mcp",
+      path: "src/index.js",
+      ref: "a".repeat(40)
+    });
+
+    expect(typeof result).toBe("object");
+    expect(result).not.toBeNull();
+    expect(
+      result.isError === true || result.content !== undefined,
+      "handler must return error result with isError or content"
+    ).toBe(true);
+  });
+
+  it("submit_review handler returns error result with mock fetch", async () => {
+    createServer({ GITHUB_TOKEN: "test-token" });
+    const handler = registeredTools.find((t) => t.name === "submit_review").handler;
+    expect(typeof handler).toBe("function");
+
+    const result = await handler({
+      repository: "xinbaijin",
+      commit: "a".repeat(40),
+      verdict: "approved",
+      summary: "test",
+      findings: []
+    });
+
+    expect(typeof result).toBe("object");
+    expect(result).not.toBeNull();
+    expect(
+      result.isError === true || result.content !== undefined,
+      "handler must return error result with isError or content"
+    ).toBe(true);
   });
 });

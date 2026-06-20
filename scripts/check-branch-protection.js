@@ -13,6 +13,8 @@
  *
  *   - allow_force_pushes must be explicitly disabled (enabled === false)
  *   - allow_deletions   must be explicitly disabled (enabled === false)
+ *   - enforce_admins    must be explicitly enabled  (enabled === true)
+ *                       CRITICAL: without this, admins can bypass
  *
  * Without these protections, the re-read + force:false PATCH in
  * updateBranchRefFastForward is not sufficient to guarantee that the
@@ -21,12 +23,12 @@
  * FAIL-CLOSED DESIGN:
  * Any missing token, API error, unexpected HTTP status, JSON parse failure,
  * missing/unexpected response fields, or protection misconfiguration results
- * in a non-zero exit code. Only explicit enabled===false on BOTH fields for
- * every repository counts as a PASS.
+ * in a non-zero exit code. Only explicit correct values on ALL three fields
+ * for every repository counts as a PASS.
  *
- * Pass --allow-skip to downgrade missing-GITHUB_TOKEN and 404 (branch
- * protection not configured) from FAIL to SKIP. All other failure modes
- * remain hard FAILs regardless of --allow-skip.
+ * Pass --allow-skip to downgrade missing-token and 404 (branch protection
+ * not configured) from FAIL to SKIP. All other failure modes remain hard
+ * FAILs regardless of --allow-skip.
  */
 
 import https from "https";
@@ -36,7 +38,7 @@ import { REPOSITORIES } from "../review-core.js";
 // Configuration
 // ---------------------------------------------------------------------------
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const TOKEN = process.env.BRANCH_PROTECTION_TOKEN || process.env.GITHUB_TOKEN;
 const ALLOW_SKIP = process.argv.includes("--allow-skip");
 
 // ---------------------------------------------------------------------------
@@ -46,17 +48,19 @@ const ALLOW_SKIP = process.argv.includes("--allow-skip");
 /**
  * Perform a GET request against the GitHub REST API.
  * Returns { status, body } where body is the raw response text.
+ * Headers match production (review-core.js githubHeaders).
  */
-function apiRequest(path) {
+function apiRequest(token, path) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: "api.github.com",
       path,
       method: "GET",
       headers: {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "check-branch-protection",
-        "Authorization": `Bearer ${GITHUB_TOKEN}`,
-        "Accept": "application/vnd.github.v3+json"
+        "Authorization": "Bearer " + token
       }
     };
 
@@ -77,35 +81,27 @@ function apiRequest(path) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Field check helpers — each returns true on PASS, false on FAIL
-// ---------------------------------------------------------------------------
-
-function checkForcePush(protection) {
-  const fpe = protection.allow_force_pushes;
-  if (fpe && typeof fpe === "object" && fpe.enabled === false) {
-    console.log("  force-push disabled: PASS");
+/**
+ * Check a single branch-protection field.
+ * Returns true on PASS, false on FAIL (prints result inline).
+ *
+ * @param {object}  protection      - Parsed JSON response from GitHub API.
+ * @param {string}  fieldName       - Property name on the protection object.
+ * @param {boolean} expectedEnabled - Expected value of field.enabled.
+ * @param {string}  label           - Human-readable label for console output.
+ */
+function checkField(protection, fieldName, expectedEnabled, label) {
+  const field = protection[fieldName];
+  if (field && typeof field === "object" && field.enabled === expectedEnabled) {
+    console.log(`  ${label}: PASS`);
     return true;
   }
-  if (fpe && fpe.enabled === true) {
-    console.log("  force-push disabled: FAIL (currently enabled)");
+  if (field && typeof field === "object" && field.enabled === !expectedEnabled) {
+    const state = field.enabled ? "enabled" : "disabled";
+    console.log(`  ${label}: FAIL (currently ${state})`);
     return false;
   }
-  console.log(`  force-push disabled: FAIL (missing or unexpected value: ${JSON.stringify(fpe)})`);
-  return false;
-}
-
-function checkDeletion(protection) {
-  const ad = protection.allow_deletions;
-  if (ad && typeof ad === "object" && ad.enabled === false) {
-    console.log("  deletion disabled:    PASS");
-    return true;
-  }
-  if (ad && ad.enabled === true) {
-    console.log("  deletion disabled:    FAIL (currently enabled)");
-    return false;
-  }
-  console.log(`  deletion disabled:    FAIL (missing or unexpected value: ${JSON.stringify(ad)})`);
+  console.log(`  ${label}: FAIL (missing or unexpected value: ${JSON.stringify(field)})`);
   return false;
 }
 
@@ -115,14 +111,14 @@ function checkDeletion(protection) {
 
 async function main() {
   // --- Token check (fail-closed) ---
-  if (!GITHUB_TOKEN) {
+  if (!TOKEN) {
     if (ALLOW_SKIP) {
-      console.log("GITHUB_TOKEN not set. Skipping branch protection check (--allow-skip).");
+      console.log("Branch protection check skipped: TOKEN not set");
       console.log("\n0 passed, 0 failed, 0 skipped");
       process.exit(0);
     }
-    console.log("FAIL: GITHUB_TOKEN is not set. Branch protection check cannot proceed.");
-    console.log("      Set GITHUB_TOKEN or pass --allow-skip to skip this check.");
+    console.log("FAIL: BRANCH_PROTECTION_TOKEN (or GITHUB_TOKEN) is not set.");
+    console.log("      Set BRANCH_PROTECTION_TOKEN or pass --allow-skip to skip this check.");
     process.exit(1);
   }
 
@@ -137,6 +133,12 @@ async function main() {
   let failed = 0;
   let skipped = 0;
 
+  const FIELDS = [
+    ["allow_force_pushes", false, "force-push disabled"],
+    ["allow_deletions", false, "deletion disabled"],
+    ["enforce_admins", true, "enforce admins"]
+  ];
+
   for (const entry of repoEntries) {
     const { name, fullName, branch } = entry;
     const displayRef = `${fullName}:${branch}`;
@@ -146,24 +148,26 @@ async function main() {
     let status, body;
     try {
       ({ status, body } = await apiRequest(
+        TOKEN,
         `/repos/${fullName}/branches/${encodeURIComponent(branch)}/protection`
       ));
     } catch (err) {
       console.log(`  FAIL: Request failed — ${err.message}`);
-      failed++;
+      failed += FIELDS.length;
       continue;
     }
 
     // --- 404: branch protection not configured ---
     if (status === 404) {
       if (ALLOW_SKIP) {
-        console.log("  force-push disabled: SKIP (branch protection not configured)");
-        console.log("  deletion disabled:    SKIP (branch protection not configured)");
-        skipped++;
+        for (const [, , label] of FIELDS) {
+          console.log(`  ${label}: SKIP (branch protection not configured)`);
+        }
+        skipped += FIELDS.length;
       } else {
         console.log("  FAIL: Branch protection is not configured on this branch (HTTP 404).");
         console.log("        Enable branch protection or pass --allow-skip.");
-        failed++;
+        failed += FIELDS.length;
       }
       continue;
     }
@@ -171,7 +175,7 @@ async function main() {
     // --- Unexpected HTTP status ---
     if (status !== 200) {
       console.log(`  FAIL: Unexpected HTTP status ${status}`);
-      failed++;
+      failed += FIELDS.length;
       continue;
     }
 
@@ -181,18 +185,17 @@ async function main() {
       protection = JSON.parse(body);
     } catch (e) {
       console.log(`  FAIL: Failed to parse API response — ${e.message}`);
-      failed++;
+      failed += FIELDS.length;
       continue;
     }
 
-    // --- Check both protection fields ---
-    const fpeOk = checkForcePush(protection);
-    const adOk = checkDeletion(protection);
-
-    if (fpeOk && adOk) {
-      passed++;
-    } else {
-      failed++;
+    // --- Check all three protection fields ---
+    for (const [fieldName, expectedEnabled, label] of FIELDS) {
+      if (checkField(protection, fieldName, expectedEnabled, label)) {
+        passed++;
+      } else {
+        failed++;
+      }
     }
   }
 

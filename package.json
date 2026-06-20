@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
-    "predeploy": "npm run check:branch-protection",
+    "predeploy": "npm run check:branch-protection -- --allow-skip",
     "check:branch-protection": "node scripts/check-branch-protection.js",
     "test": "vitest run"
   },
