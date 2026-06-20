@@ -1,5 +1,7 @@
-﻿import { createMcpHandler } from "agents/mcp";
+﻿
+import { createMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 
 const DEFAULT_OWNER = "shunhang776";
 const DEFAULT_REPO = "xinbaijin-mcp";
@@ -92,6 +94,48 @@ function createServer(env) {
     }
   );
 
+  server.registerTool(
+    "get_patch",
+    {
+      description:
+        "读取指定提交（默认 dev 最新提交）的文件级 patch，供 ChatGPT 进行代码审查。",
+      inputSchema: z.object({
+        sha: z
+          .string()
+          .trim()
+          .min(7)
+          .optional()
+          .describe("可选提交 SHA；省略时读取 dev 分支最新提交。")
+      })
+    },
+    async ({ sha }) => {
+      try {
+        const patch = await getPatch(env, sha);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(patch, null, 2)
+            }
+          ]
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text:
+                error instanceof Error
+                  ? error.message
+                  : String(error)
+            }
+          ]
+        };
+      }
+    }
+  );
   return server;
 }
 
@@ -155,6 +199,76 @@ async function getLatestHandoff(env) {
         .map((file) => file.filename)
     },
     status: "ready_for_review"
+  };
+}
+
+async function getPatch(env, requestedSha) {
+  const owner = env.GITHUB_OWNER || DEFAULT_OWNER;
+  const repo = env.GITHUB_REPO || DEFAULT_REPO;
+  const branch = env.GITHUB_BRANCH || DEFAULT_BRANCH;
+  const token = env.GITHUB_TOKEN;
+
+  if (!token) {
+    throw new Error(
+      "GITHUB_TOKEN is not configured in Cloudflare Worker secrets."
+    );
+  }
+
+  const ref =
+    typeof requestedSha === "string" && requestedSha.trim()
+      ? requestedSha.trim()
+      : branch;
+
+  const endpoint =
+    `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`;
+
+  const response = await fetch(endpoint, {
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token}`,
+      "user-agent": "xinbaijin-mcp-worker",
+      "x-github-api-version": "2022-11-28"
+    }
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+
+    throw new Error(
+      `GitHub API request failed: ${response.status} ${details}`
+    );
+  }
+
+  const commit = await response.json();
+  const files = Array.isArray(commit.files)
+    ? commit.files
+    : [];
+
+  return {
+    protocol: "xinbaijin-patch/1.0",
+    repository: `${owner}/${repo}`,
+    branch,
+    requested_ref: ref,
+    commit: commit.sha || null,
+    message: commit.commit?.message || null,
+    stats: {
+      additions: commit.stats?.additions ?? 0,
+      deletions: commit.stats?.deletions ?? 0,
+      total: commit.stats?.total ?? 0
+    },
+    files: files.map((file) => ({
+      filename: file.filename,
+      previous_filename: file.previous_filename || null,
+      status: file.status || null,
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+      changes: file.changes ?? 0,
+      patch_available: typeof file.patch === "string",
+      patch:
+        typeof file.patch === "string"
+          ? file.patch
+          : null
+    }))
   };
 }
 
