@@ -3,10 +3,10 @@
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
   "reviewed_commit": "cf03aa8adc65720672d1bd010ba622653cfc7b30",
-  "based_on_branch_head": "d1adecba5c875e823b5e4b75a243a65dcdf983c0",
+  "based_on_branch_head": "dd4c7d85cce58f97d2d1a9697a3b7b118e147b27",
   "verdict": "approved",
-  "summary": "并发竞态验收请求 A：与请求 B 同时提交。预期只有一个请求能以当前 branch head 为父提交并成功 fast-forward；另一个必须因分支头变化而拒绝，不能覆盖或落到新提交之上。",
+  "summary": "并发竞态验收请求 B1：与 B2 同批触发。预期同一分支头上最多一个请求成功；另一个必须因非 fast-forward 更新失败。",
   "findings": [],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-20T11:23:20.932Z"
+  "reviewed_at": "2026-06-20T11:23:29.813Z"
 }
