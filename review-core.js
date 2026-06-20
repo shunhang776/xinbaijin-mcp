@@ -47,40 +47,202 @@ async function getCommitDetails(env, ref) {
   return response.json();
 }
 
-async function getLatestReviewableCommit(env, startRef) {
-  const { branch } = getRepositoryConfig(env);
+function isReviewOnlyCommit(commit) {
+  const files = Array.isArray(commit.files)
+    ? commit.files
+    : [];
 
-  let ref = startRef || branch;
-
-  for (let index = 0; index < 20; index += 1) {
-    const commit = await getCommitDetails(env, ref);
-
-    const files = Array.isArray(commit.files)
-      ? commit.files
-      : [];
-
-    const isReviewOnlyCommit =
-      files.length > 0 &&
-      files.every((file) => file.filename === "review.json");
-
-    if (!isReviewOnlyCommit) {
-      return commit;
-    }
-
-    const parentSha = commit.parents?.[0]?.sha;
-
-    if (!parentSha) {
-      break;
-    }
-
-    ref = parentSha;
-  }
-
-  throw new Error(
-    "Unable to locate the latest reviewable code commit."
+  return (
+    files.length > 0 &&
+    files.every(
+      (file) => file.filename === "review.json"
+    )
   );
 }
 
+async function getReviewMetadata(env, ref) {
+  const {
+    owner,
+    repo,
+    token
+  } = getRepositoryConfig(env);
+
+  const endpoint =
+    `https://api.github.com/repos/${owner}/${repo}` +
+    `/contents/review.json?ref=${encodeURIComponent(ref)}`;
+
+  const response = await fetch(endpoint, {
+    headers: githubHeaders(token)
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const file = await response.json();
+
+  if (
+    Array.isArray(file) ||
+    file.type !== "file" ||
+    file.encoding !== "base64" ||
+    typeof file.content !== "string"
+  ) {
+    return null;
+  }
+
+  try {
+    const cleanBase64 =
+      file.content.replace(/\s/g, "");
+
+    const binary = atob(cleanBase64);
+    const bytes = Uint8Array.from(
+      binary,
+      (character) => character.charCodeAt(0)
+    );
+
+    const text = new TextDecoder(
+      "utf-8",
+      { fatal: true }
+    ).decode(bytes);
+
+    const parsed = JSON.parse(text);
+
+    return (
+      parsed &&
+      typeof parsed === "object"
+        ? parsed
+        : null
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function isAncestorCommit(
+  env,
+  ancestorSha,
+  descendantSha
+) {
+  const {
+    owner,
+    repo,
+    token
+  } = getRepositoryConfig(env);
+
+  const endpoint =
+    `https://api.github.com/repos/${owner}/${repo}` +
+    `/compare/${encodeURIComponent(ancestorSha)}` +
+    `...${encodeURIComponent(descendantSha)}`;
+
+  const response = await fetch(endpoint, {
+    headers: githubHeaders(token)
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const comparison = await response.json();
+
+  return (
+    comparison.status === "ahead" ||
+    comparison.status === "identical"
+  );
+}
+
+async function getLatestReviewableCommit(env, startRef) {
+  const { branch } = getRepositoryConfig(env);
+
+  const initialRef = startRef || branch;
+  let commit =
+    await getCommitDetails(env, initialRef);
+
+  if (!isReviewOnlyCommit(commit)) {
+    return commit;
+  }
+
+  // Fast path: a review-only head contains the exact code commit
+  // that was reviewed. Validate that the target exists, is a code
+  // commit, and is an ancestor of the captured branch head.
+  const metadata =
+    await getReviewMetadata(env, initialRef);
+
+  const reviewedCommit = String(
+    metadata?.reviewed_commit || ""
+  ).toLowerCase();
+
+  if (/^[0-9a-f]{40}$/.test(reviewedCommit)) {
+    try {
+      const candidate =
+        await getCommitDetails(
+          env,
+          reviewedCommit
+        );
+
+      const reachable =
+        await isAncestorCommit(
+          env,
+          reviewedCommit,
+          String(commit.sha || initialRef)
+        );
+
+      if (
+        reachable &&
+        !isReviewOnlyCommit(candidate)
+      ) {
+        return candidate;
+      }
+    } catch {
+      // Fall back to parent traversal below.
+    }
+  }
+
+  // Fallback: follow first parents without a fixed depth limit.
+  // A visited set prevents malformed history from looping forever.
+  const visited = new Set();
+
+  while (true) {
+    const currentSha = String(
+      commit.sha || ""
+    ).toLowerCase();
+
+    if (
+      currentSha &&
+      visited.has(currentSha)
+    ) {
+      throw new Error(
+        "Commit history cycle detected while locating the latest reviewable code commit."
+      );
+    }
+
+    if (currentSha) {
+      visited.add(currentSha);
+    }
+
+    if (!isReviewOnlyCommit(commit)) {
+      return commit;
+    }
+
+    const parentSha =
+      commit.parents?.[0]?.sha;
+
+    if (!parentSha) {
+      throw new Error(
+        "Unable to locate the latest reviewable code commit."
+      );
+    }
+
+    commit =
+      await getCommitDetails(
+        env,
+        parentSha
+      );
+  }
+}
 async function getExistingReviewFileSha(env) {
   const { owner, repo, branch, token } =
     getRepositoryConfig(env);
@@ -382,6 +544,7 @@ async function submitReview(env, input) {
 }
 export {
   submitReview,
+  getLatestReviewableCommit,
   getRepositoryConfig,
   githubHeaders
 };
