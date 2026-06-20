@@ -1,11 +1,33 @@
-const DEFAULT_OWNER = "shunhang776";
-const DEFAULT_REPO = "xinbaijin-mcp";
-const DEFAULT_BRANCH = "dev";
-function getRepositoryConfig(env) {
+const REPOSITORIES = Object.freeze({
+  xinbaijin: {
+    owner: "shunhang776",
+    repo: "xinbaijin",
+    branch: "dev"
+  },
+  "xinbaijin-mcp": {
+    owner: "shunhang776",
+    repo: "xinbaijin-mcp",
+    branch: "dev"
+  }
+});
+
+const DEFAULT_REPOSITORY = "xinbaijin";
+
+function getRepositoryConfig(env, repositoryName) {
+  const name = repositoryName || DEFAULT_REPOSITORY;
+  const config = REPOSITORIES[name];
+
+  if (!config) {
+    throw new Error(
+      `Unknown repository: "${name}". ` +
+      `Allowed repositories: ${Object.keys(REPOSITORIES).sort().join(", ")}.`
+    );
+  }
+
   return {
-    owner: env.GITHUB_OWNER || DEFAULT_OWNER,
-    repo: env.GITHUB_REPO || DEFAULT_REPO,
-    branch: env.GITHUB_BRANCH || DEFAULT_BRANCH,
+    owner: config.owner,
+    repo: config.repo,
+    branch: config.branch,
     token: env.GITHUB_TOKEN
   };
 }
@@ -20,8 +42,8 @@ function githubHeaders(token) {
   };
 }
 
-async function getCommitDetails(env, ref) {
-  const { owner, repo, token } = getRepositoryConfig(env);
+async function getCommitDetails(env, ref, repositoryName) {
+  const { owner, repo, token } = getRepositoryConfig(env, repositoryName);
 
   if (!token) {
     throw new Error(
@@ -60,12 +82,12 @@ function isReviewOnlyCommit(commit) {
   );
 }
 
-async function getReviewMetadata(env, ref) {
+async function getReviewMetadata(env, ref, repositoryName) {
   const {
     owner,
     repo,
     token
-  } = getRepositoryConfig(env);
+  } = getRepositoryConfig(env, repositoryName);
 
   const endpoint =
     `https://api.github.com/repos/${owner}/${repo}` +
@@ -125,13 +147,14 @@ async function getReviewMetadata(env, ref) {
 async function isAncestorCommit(
   env,
   ancestorSha,
-  descendantSha
+  descendantSha,
+  repositoryName
 ) {
   const {
     owner,
     repo,
     token
-  } = getRepositoryConfig(env);
+  } = getRepositoryConfig(env, repositoryName);
 
   const endpoint =
     `https://api.github.com/repos/${owner}/${repo}` +
@@ -154,12 +177,12 @@ async function isAncestorCommit(
   );
 }
 
-async function getLatestReviewableCommit(env, startRef) {
-  const { branch } = getRepositoryConfig(env);
+async function getLatestReviewableCommit(env, startRef, repositoryName) {
+  const { branch } = getRepositoryConfig(env, repositoryName);
 
   const initialRef = startRef || branch;
   let commit =
-    await getCommitDetails(env, initialRef);
+    await getCommitDetails(env, initialRef, repositoryName);
 
   if (!isReviewOnlyCommit(commit)) {
     return commit;
@@ -169,7 +192,7 @@ async function getLatestReviewableCommit(env, startRef) {
   // that was reviewed. Validate that the target exists, is a code
   // commit, and is an ancestor of the captured branch head.
   const metadata =
-    await getReviewMetadata(env, initialRef);
+    await getReviewMetadata(env, initialRef, repositoryName);
 
   const reviewedCommit = String(
     metadata?.reviewed_commit || ""
@@ -180,14 +203,16 @@ async function getLatestReviewableCommit(env, startRef) {
       const candidate =
         await getCommitDetails(
           env,
-          reviewedCommit
+          reviewedCommit,
+          repositoryName
         );
 
       const reachable =
         await isAncestorCommit(
           env,
           reviewedCommit,
-          String(commit.sha || initialRef)
+          String(commit.sha || initialRef),
+          repositoryName
         );
 
       if (
@@ -239,13 +264,14 @@ async function getLatestReviewableCommit(env, startRef) {
     commit =
       await getCommitDetails(
         env,
-        parentSha
+        parentSha,
+        repositoryName
       );
   }
 }
-async function getExistingReviewFileSha(env) {
+async function getExistingReviewFileSha(env, repositoryName) {
   const { owner, repo, branch, token } =
-    getRepositoryConfig(env);
+    getRepositoryConfig(env, repositoryName);
 
   const endpoint =
     `https://api.github.com/repos/${owner}/${repo}/contents/review.json` +
@@ -279,9 +305,9 @@ function encodeGitRef(ref) {
     .join("/");
 }
 
-async function getBranchHeadSha(env) {
+async function getBranchHeadSha(env, repositoryName) {
   const { owner, repo, branch, token } =
-    getRepositoryConfig(env);
+    getRepositoryConfig(env, repositoryName);
 
   if (!token) {
     throw new Error(
@@ -321,13 +347,14 @@ async function createReviewGitCommit(
   env,
   parentSha,
   reviewText,
-  commitMessage
+  commitMessage,
+  repositoryName
 ) {
   const { owner, repo, token } =
-    getRepositoryConfig(env);
+    getRepositoryConfig(env, repositoryName);
 
   const parentCommit =
-    await getCommitDetails(env, parentSha);
+    await getCommitDetails(env, parentSha, repositoryName);
 
   const baseTreeSha =
     parentCommit.commit?.tree?.sha;
@@ -420,10 +447,11 @@ async function createReviewGitCommit(
 
 async function updateBranchRefFastForward(
   env,
-  newCommitSha
+  newCommitSha,
+  repositoryName
 ) {
   const { owner, repo, branch, token } =
-    getRepositoryConfig(env);
+    getRepositoryConfig(env, repositoryName);
 
   const endpoint =
     `https://api.github.com/repos/${owner}/${repo}` +
@@ -459,9 +487,9 @@ async function updateBranchRefFastForward(
   return response.json();
 }
 
-async function submitReview(env, input) {
+async function submitReview(env, input, repositoryName) {
   const { owner, repo, branch, token } =
-    getRepositoryConfig(env);
+    getRepositoryConfig(env, repositoryName);
 
   if (!token) {
     throw new Error(
@@ -471,12 +499,13 @@ async function submitReview(env, input) {
 
   // 固定本次写入所基于的分支头。后续所有校验和提交都基于这个不可变 SHA。
   const branchHead =
-    await getBranchHeadSha(env);
+    await getBranchHeadSha(env, repositoryName);
 
   const latestCodeCommit =
     await getLatestReviewableCommit(
       env,
-      branchHead
+      branchHead,
+      repositoryName
     );
 
   const expectedCommit =
@@ -518,14 +547,16 @@ async function submitReview(env, input) {
       env,
       branchHead,
       reviewText,
-      commitMessage
+      commitMessage,
+      repositoryName
     );
 
   // 最后用非强制 fast-forward 更新分支。
   // 若 branchHead 已变化，这一步会失败，旧审查不会落到新代码之上。
   await updateBranchRefFastForward(
     env,
-    created.commitSha
+    created.commitSha,
+    repositoryName
   );
 
   return {
@@ -546,5 +577,7 @@ export {
   submitReview,
   getLatestReviewableCommit,
   getRepositoryConfig,
-  githubHeaders
+  githubHeaders,
+  REPOSITORIES,
+  DEFAULT_REPOSITORY
 };

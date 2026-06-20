@@ -5,10 +5,6 @@ import { z } from "zod";
 import { Buffer } from "node:buffer";
 import { submitReview, getRepositoryConfig, githubHeaders } from "./review-core.js";
 
-const DEFAULT_OWNER = "shunhang776";
-const DEFAULT_REPO = "xinbaijin-mcp";
-const DEFAULT_BRANCH = "dev";
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -65,12 +61,17 @@ function createServer(env) {
     "get_latest_handoff",
     {
       description:
-        "读取 xinbaijin-mcp 仓库 dev 分支的最新提交，并生成标准化 handoff。",
-      inputSchema: {}
+        "读取指定仓库 dev 分支的最新提交，并生成标准化 handoff。" +
+        "默认仓库为 xinbaijin。",
+      inputSchema: z.object({
+        repository: z.enum(["xinbaijin", "xinbaijin-mcp"])
+          .optional()
+          .describe("目标仓库。省略时默认使用 xinbaijin。")
+      })
     },
-    async () => {
+    async ({ repository }) => {
       try {
-        const handoff = await getLatestHandoff(env);
+        const handoff = await getLatestHandoff(env, repository);
 
         return {
           content: [
@@ -110,7 +111,10 @@ function createServer(env) {
     .trim()
     .min(7)
     .optional()
-    .describe("可选提交 SHA；省略时读取 dev 分支最新提交。")
+    .describe("可选提交 SHA；省略时读取 dev 分支最新提交。"),
+  repository: z.enum(["xinbaijin", "xinbaijin-mcp"])
+    .optional()
+    .describe("目标仓库。省略时默认使用 xinbaijin。")
 }),
 outputSchema: {
   protocol: z.string(),
@@ -141,9 +145,9 @@ outputSchema: {
       readOnlyHint: true
     }
   },
-    async ({ sha }) => {
+    async ({ sha, repository }) => {
       try {
-       const patch = await getPatch(env, sha);
+       const patch = await getPatch(env, sha, repository);
 
 return {
   structuredContent: patch,
@@ -178,7 +182,9 @@ return {
     "submit_review",
     {
       description:
-        "将 ChatGPT 的代码审查结果写入 dev 分支根目录 review.json。此工具只能写 review.json，不能修改源代码。",
+        "将代码审查结果写入指定仓库 dev 分支根目录 review.json。" +
+        "此工具只能写 review.json，不能修改源代码。" +
+        "默认仓库为 xinbaijin。",
       inputSchema: z.object({
         commit: z
           .string()
@@ -240,12 +246,16 @@ return {
                 .max(5000)
             })
           )
-          .max(100)
+          .max(100),
+
+        repository: z.enum(["xinbaijin", "xinbaijin-mcp"])
+          .optional()
+          .describe("目标仓库。省略时默认使用 xinbaijin。")
       })
     },
-    async (input) => {
+    async ({ repository, ...input }) => {
       try {
-        const result = await submitReview(env, input);
+        const result = await submitReview(env, input, repository);
 
         return {
           content: [
@@ -279,7 +289,7 @@ return {
         "当审查涉及转义符、引号、Unicode、Base64、JSON 格式、文件末尾换行或编码时，" +
         "必须调用此工具核实原始文件后才能形成 finding。",
 
-      inputSchema: {
+      inputSchema: z.object({
         path: z
           .string()
           .trim()
@@ -290,8 +300,12 @@ return {
         ref: z
           .string()
           .regex(/^[0-9a-fA-F]{40}$/)
-          .describe("要读取的完整 Git commit SHA。")
-      },
+          .describe("要读取的完整 Git commit SHA。"),
+
+        repository: z.enum(["xinbaijin", "xinbaijin-mcp"])
+          .optional()
+          .describe("目标仓库。省略时默认使用 xinbaijin。")
+      }),
 
       outputSchema: {
         protocol: z.literal("xinbaijin-file/1.0"),
@@ -318,9 +332,9 @@ return {
       }
     },
 
-    async ({ path, ref }) => {
+    async ({ path, ref, repository }) => {
       try {
-        const result = await getFileContent(env, path, ref);
+        const result = await getFileContent(env, path, ref, repository);
 
         return {
           structuredContent: result,
@@ -361,11 +375,9 @@ return {
   return server;
 }
 
-async function getLatestHandoff(env) {
-  const owner = env.GITHUB_OWNER || DEFAULT_OWNER;
-  const repo = env.GITHUB_REPO || DEFAULT_REPO;
-  const branch = env.GITHUB_BRANCH || DEFAULT_BRANCH;
-  const token = env.GITHUB_TOKEN;
+async function getLatestHandoff(env, repositoryName) {
+  const { owner, repo, branch, token } =
+    getRepositoryConfig(env, repositoryName);
 
   if (!token) {
     throw new Error(
@@ -377,12 +389,7 @@ async function getLatestHandoff(env) {
     `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`;
 
   const response = await fetch(endpoint, {
-    headers: {
-      "accept": "application/vnd.github+json",
-      "authorization": `Bearer ${token}`,
-      "user-agent": "xinbaijin-mcp-worker",
-      "x-github-api-version": "2022-11-28"
-    }
+    headers: githubHeaders(token)
   });
 
   if (!response.ok) {
@@ -424,11 +431,9 @@ async function getLatestHandoff(env) {
   };
 }
 
-async function getPatch(env, requestedSha) {
-  const owner = env.GITHUB_OWNER || DEFAULT_OWNER;
-  const repo = env.GITHUB_REPO || DEFAULT_REPO;
-  const branch = env.GITHUB_BRANCH || DEFAULT_BRANCH;
-  const token = env.GITHUB_TOKEN;
+async function getPatch(env, requestedSha, repositoryName) {
+  const { owner, repo, branch, token } =
+    getRepositoryConfig(env, repositoryName);
 
   if (!token) {
     throw new Error(
@@ -445,12 +450,7 @@ async function getPatch(env, requestedSha) {
     `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`;
 
   const response = await fetch(endpoint, {
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: `Bearer ${token}`,
-      "user-agent": "xinbaijin-mcp-worker",
-      "x-github-api-version": "2022-11-28"
-    }
+    headers: githubHeaders(token)
   });
 
   if (!response.ok) {
@@ -575,13 +575,14 @@ function detectLineEnding(text) {
 async function getFileContent(
   env,
   requestedPath,
-  ref
+  ref,
+  repositoryName
 ) {
   const {
     owner,
     repo,
     token
-  } = getRepositoryConfig(env);
+  } = getRepositoryConfig(env, repositoryName);
 
   if (!token) {
     throw new Error(
@@ -768,5 +769,3 @@ function jsonResponse(data, status = 200) {
     }
   });
 }
-
-
