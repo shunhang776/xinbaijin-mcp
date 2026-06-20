@@ -1,0 +1,44 @@
+{
+  "protocol": "xinbaijin-review/1.0",
+  "repository": "shunhang776/xinbaijin-mcp",
+  "branch": "dev",
+  "reviewed_commit": "5cb15a5f88f3c3487a6a605d0f7904730a2e6741",
+  "verdict": "changes_requested",
+  "summary": "本次提交完成了 submit_review 工具、输入校验、过期审查拦截及 GitHub Contents API 写回流程，整体方向正确，但当前实现存在会直接影响审查闭环可靠性的缺陷：生成的 review.json 末尾追加了字面量反斜杠+n，导致文件不是合法 JSON；同时，最新代码提交校验与实际写入不是原子操作，分支在两者之间推进时仍可能把过期审查成功写入。另需确认写操作接口已在边缘层实施强制认证，否则公开 MCP 端点可被第三方借用 Worker 的 GitHub 凭据覆盖审查结果。建议修复后补充创建、更新、过期提交、并发推进及 JSON 可解析性测试。",
+  "findings": [
+    {
+      "severity": "high",
+      "file": "worker.js",
+      "line": null,
+      "title": "review.json 末尾写入字面量 \\\\n，生成内容不是合法 JSON",
+      "description": "reviewText 使用模板字符串追加了 `\\\\n`。这会在 JSON 结束花括号之后写入两个普通字符（反斜杠和 n），而不是真正的换行符。GitHub 中的 review.json 因此包含 JSON 文档之外的额外非空白字符，标准 JSON.parse、Claude 或其他严格解析器读取时会失败，直接中断审查闭环。",
+      "recommendation": "把字面量 `\\\\n` 改为真正的换行符 `\\n`，例如 `const reviewText = `${JSON.stringify(review, null, 2)}\\n`;`。写入前后增加测试：Base64 解码后执行 JSON.parse，并断言 reviewed_commit、verdict 和 findings 可正常读取。"
+    },
+    {
+      "severity": "high",
+      "file": "worker.js",
+      "line": null,
+      "title": "过期审查校验与写入之间存在 TOCTOU 竞态",
+      "description": "submitReview 先读取“最新可审查提交”并比较 input.commit，随后再读取 review.json 的 SHA 并调用 Contents API。若 dev 分支在校验之后、PUT 之前出现新的代码提交，PUT 仍可能基于新的分支头成功创建审查提交，从而把针对旧代码的 review.json 写到新代码之上，违背 stale review 必须被拒绝的核心约束。",
+      "recommendation": "将写入改为基于期望分支头的原子提交：读取当前 ref，创建 blob/tree/commit，并仅在 ref 仍等于期望头时更新；若 GitHub API 无法提供直接 compare-and-swap，则至少在写入前再次读取分支头并在不一致时拒绝，同时处理 409/422 后重新校验。测试中模拟校验后分支推进，确保旧审查绝不会落到新代码提交之后。"
+    },
+    {
+      "severity": "medium",
+      "file": "worker.js",
+      "line": null,
+      "title": "新增写仓库工具未在本提交中实施调用方认证",
+      "description": "submit_review 使用 Worker 中的 GITHUB_TOKEN 直接覆盖 dev 分支根目录 review.json，但本提交展示的工具注册和 submitReview 路径没有调用方身份校验或授权判断。若 MCP 路由可被公网访问，知道最新 commit SHA 的第三方即可调用该工具，伪造 ChatGPT 审查结果并以 Worker 凭据提交到仓库。",
+      "recommendation": "在进入 MCP 写操作前强制验证 Cloudflare Access、服务令牌或独立的高熵共享密钥，并对 submit_review 单独授权；不要仅依赖端点地址保密。记录调用主体，限制请求频率，并确认 GitHub Token 只拥有该仓库所需的最小 Contents 写权限。若认证已由外层完成，应加入可验证的配置和集成测试，避免部署时意外裸露。"
+    },
+    {
+      "severity": "low",
+      "file": "worker.js",
+      "line": null,
+      "title": "连续 20 个仅审查提交后会无法找到可审查代码提交",
+      "description": "getLatestReviewableCommit 最多回溯 20 次。若连续提交或重写 review.json 超过 20 次而没有新的代码提交，函数会抛出 Unable to locate the latest reviewable code commit，导致 submit_review 暂时不可用。该情况在重复审查和修订流程中可以发生。",
+      "recommendation": "不要使用固定 20 次作为正确性边界。可持续沿 first-parent 回溯至找到非 review.json 提交，并设置更高的安全上限与明确诊断；更稳妥的是在 review.json 或专用状态中保存最近代码提交并验证其可达性。"
+    }
+  ],
+  "reviewer": "ChatGPT",
+  "reviewed_at": "2026-06-20T09:45:37.151Z"
+}
