@@ -61,12 +61,15 @@ function createServer(env) {
     "get_latest_handoff",
     {
       description:
-        "读取目标仓库 dev 分支的最新提交，并生成标准化 handoff。",
+        "读取目标仓库（必填）dev 分支的最新提交，并生成标准化 handoff。",
       inputSchema: {
-        repository: z.enum(["xinbaijin","xinbaijin-mcp"]).optional().describe("目标仓库，省略时默认 xinbaijin")
+        repository: z.enum(["xinbaijin","xinbaijin-mcp"]).describe("目标仓库（必填）")
       }
     },
     async ({ repository }) => {
+      if (!repository) {
+        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+      }
       try {
         const handoff = await getLatestHandoff(env, repository);
 
@@ -103,7 +106,7 @@ function createServer(env) {
   "文件末尾换行或编码问题时，不得仅根据 patch 下结论，" +
   "必须调用 get_file_content 核实原始源码。",
   inputSchema: z.object({
-  repository: z.enum(["xinbaijin","xinbaijin-mcp"]).optional().describe("目标仓库，省略时默认 xinbaijin"),
+  repository: z.enum(["xinbaijin","xinbaijin-mcp"]).describe("目标仓库（必填）"),
   sha: z
     .string()
     .trim()
@@ -141,6 +144,9 @@ outputSchema: {
     }
   },
     async ({ sha, repository }) => {
+      if (!repository) {
+        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+      }
       try {
        const patch = await getPatch(env, sha, repository);
 
@@ -177,9 +183,9 @@ return {
     "submit_review",
     {
       description:
-        "将 ChatGPT 的代码审查结果写入目标仓库 dev 分支根目录 review.json。此工具只能写 review.json，不能修改源代码。",
+        "将 ChatGPT 的代码审查结果写入目标仓库（必填）dev 分支根目录 review.json。此工具只能写 review.json，不能修改源代码。",
       inputSchema: z.object({
-        repository: z.enum(["xinbaijin","xinbaijin-mcp"]).optional().describe("目标仓库，省略时默认 xinbaijin"),
+        repository: z.enum(["xinbaijin","xinbaijin-mcp"]).describe("目标仓库（必填）"),
         commit: z
           .string()
           .regex(/^[0-9a-fA-F]{40}$/)
@@ -244,6 +250,9 @@ return {
       })
     },
     async ({ repository, ...input }) => {
+      if (!repository) {
+        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+      }
       try {
         const result = await submitReview(env, input, repository);
 
@@ -280,7 +289,7 @@ return {
         "必须调用此工具核实原始文件后才能形成 finding。",
 
       inputSchema: {
-        repository: z.enum(["xinbaijin","xinbaijin-mcp"]).optional().describe("目标仓库，省略时默认 xinbaijin"),
+        repository: z.enum(["xinbaijin","xinbaijin-mcp"]).describe("目标仓库（必填）"),
 
         path: z
           .string()
@@ -321,6 +330,9 @@ return {
     },
 
     async ({ path, ref, repository }) => {
+      if (!repository) {
+        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+      }
       try {
         const result = await getFileContent(env, path, ref, repository);
 
