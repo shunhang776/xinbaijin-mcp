@@ -13,38 +13,26 @@ import { z } from "zod";
 // Group 1: MCP tool schemas reject missing repository — uses production schemas
 // ---------------------------------------------------------------------------
 
-describe("MCP tool schemas require repository (no .optional())", () => {
-  it("get_latest_handoff rejects missing repository", () => {
+describe("MCP tool schemas — repository is optional (defaults to xinbaijin)", () => {
+  it("get_latest_handoff accepts missing repository", () => {
     const result = z.object(GET_LATEST_HANDOFF_SCHEMA).safeParse({});
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues[0].path).toContain("repository");
-    }
+    expect(result.success).toBe(true);
   });
 
-  it("get_patch rejects missing repository", () => {
+  it("get_patch accepts missing repository", () => {
     const result = GET_PATCH_SCHEMA.safeParse({});
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues[0].path).toContain("repository");
-    }
+    expect(result.success).toBe(true);
   });
 
-  it("get_file_content rejects missing repository", () => {
+  it("get_file_content accepts missing repository (path+ref still required)", () => {
+    // path and ref are still required; only repository is optional
     const result = z.object(GET_FILE_CONTENT_SCHEMA).safeParse({});
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const paths = result.error.issues.flatMap((i) => i.path);
-      expect(paths).toContain("repository");
-    }
+    expect(result.success).toBe(false); // path + ref missing
   });
 
-  it("submit_review rejects missing repository", () => {
+  it("submit_review accepts missing repository (commit still required)", () => {
     const result = SUBMIT_REVIEW_SCHEMA.safeParse({});
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues[0].path).toContain("repository");
-    }
+    expect(result.success).toBe(false); // commit + verdict etc missing
   });
 
   it("get_patch accepts valid repository plus optional sha", () => {

@@ -5,7 +5,8 @@ import { REPOSITORY_NAMES } from "./review-core.js";
 // 提取为独立模块：worker.js 和 test 共同导入，避免重复定义
 export const REPOSITORY_PARAM = z
   .enum(REPOSITORY_NAMES)
-  .describe("目标仓库（必填）");
+  .optional()
+  .describe("目标仓库，省略时默认 xinbaijin");
 
 // ---------------------------------------------------------------------------
 // 完整工具输入 schema — 生产代码与测试共用，消除定义不一致风险

@@ -63,4 +63,19 @@ function logGitHubError(details) {
   console.error(line);
 }
 
-export { logGitHubError };
+/**
+ * Log handler invocation args — structural metadata only, NEVER values.
+ * @param {string} tool - MCP tool name
+ * @param {*} args - handler arguments object
+ */
+function logHandlerArgs(tool, args) {
+  const entry = {
+    tool,
+    typeofArgs: typeof args,
+    argKeys: args && typeof args === "object" ? Object.keys(args) : [],
+    hasRepository: args && typeof args === "object" && "repository" in args
+  };
+  console.error(JSON.stringify(entry));
+}
+
+export { logGitHubError, logHandlerArgs };

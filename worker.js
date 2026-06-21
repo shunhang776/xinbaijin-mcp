@@ -78,18 +78,32 @@ export function createServer(env) {
     version: "1.0.0"
   });
 
+  // ---- get_latest_handoff ----
   server.registerTool(
     "get_latest_handoff",
     {
       description:
-        "读取目标仓库（必填）dev 分支的最新提交，并生成标准化 handoff。",
+        "读取目标仓库 dev 分支的最新提交，并生成标准化 handoff。省略 repository 时默认 xinbaijin。",
       inputSchema: GET_LATEST_HANDOFF_SCHEMA
     },
-    async ({ repository }) => {
+    async (args) => {
       try {
-        if (!repository) {
-          throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+        console.error(JSON.stringify({
+          tool: "get_latest_handoff",
+          typeofArgs: typeof args,
+          argKeys: args ? Object.keys(args) : [],
+          repository: args?.repository
+        }));
+
+        const repository = args?.repository || DEFAULT_REPOSITORY;
+
+        if (!REPOSITORIES[repository]) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: "Unknown repository: " + repository + ". Allowed: " + Object.keys(REPOSITORIES).join(", ") }]
+          };
         }
+
         const handoff = await getLatestHandoff(env, repository);
 
         return {
@@ -101,7 +115,7 @@ export function createServer(env) {
           ]
         };
       } catch (error) {
-        console.error("get_latest_handoff error:", error.message);
+        console.error("get_latest_handoff error:", error.name, error.message);
         return {
           isError: true,
           content: [
@@ -117,6 +131,7 @@ export function createServer(env) {
     }
   );
 
+  // ---- get_patch ----
   server.registerTool(
     "get_patch",
     {
@@ -155,28 +170,43 @@ outputSchema: {
       readOnlyHint: true
     }
   },
-    async ({ sha, repository }) => {
+    async (args) => {
       try {
-        if (!repository) {
-          throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
-        }
-       const patch = await getPatch(env, sha, repository);
+        console.error(JSON.stringify({
+          tool: "get_patch",
+          typeofArgs: typeof args,
+          argKeys: args ? Object.keys(args) : [],
+          repository: args?.repository,
+          hasSha: !!(args?.sha)
+        }));
 
-return {
-  structuredContent: patch,
-  content: [
-    {
-      type: "text",
-      text:
-        `已获取提交 ${patch.commit} 的 patch，` +
-        `共 ${patch.files.length} 个文件，` +
-        `新增 ${patch.stats.additions} 行，` +
-        `删除 ${patch.stats.deletions} 行。`
-    }
-  ]
-};
+        const repository = args?.repository || DEFAULT_REPOSITORY;
+
+        if (!REPOSITORIES[repository]) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: "Unknown repository: " + repository + ". Allowed: " + Object.keys(REPOSITORIES).join(", ") }]
+          };
+        }
+
+        const sha = args?.sha;
+        const patch = await getPatch(env, sha, repository);
+
+	return {
+	  structuredContent: patch,
+	  content: [
+	    {
+	      type: "text",
+	      text:
+	        `已获取提交 ${patch.commit} 的 patch，` +
+	        `共 ${patch.files.length} 个文件，` +
+	        `新增 ${patch.stats.additions} 行，` +
+	        `删除 ${patch.stats.deletions} 行。`
+	    }
+	  ]
+	};
       } catch (error) {
-        console.error("get_patch error:", error.message);
+        console.error("get_patch error:", error.name, error.message);
         return {
           isError: true,
           content: [
@@ -192,18 +222,36 @@ return {
       }
     }
   );
+
+  // ---- submit_review ----
   server.registerTool(
     "submit_review",
     {
       description:
-        "将 ChatGPT 的代码审查结果写入目标仓库（必填）dev 分支根目录 review.json。此工具只能写 review.json，不能修改源代码。",
+        "将 ChatGPT 的代码审查结果写入目标仓库 dev 分支根目录 review.json。此工具只能写 review.json，不能修改源代码。省略 repository 时默认 xinbaijin。",
       inputSchema: SUBMIT_REVIEW_SCHEMA
     },
-    async ({ repository, ...input }) => {
+    async (args) => {
       try {
-        if (!repository) {
-          throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+        console.error(JSON.stringify({
+          tool: "submit_review",
+          typeofArgs: typeof args,
+          argKeys: args ? Object.keys(args) : [],
+          repository: args?.repository
+        }));
+
+        const repository = args?.repository || DEFAULT_REPOSITORY;
+
+        if (!REPOSITORIES[repository]) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: "Unknown repository: " + repository + ". Allowed: " + Object.keys(REPOSITORIES).join(", ") }]
+          };
         }
+
+        const input = { ...args };
+        delete input.repository;
+
         const result = await submitReview(env, input, repository);
 
         return {
@@ -215,7 +263,7 @@ return {
           ]
         };
       } catch (error) {
-        console.error("submit_review error:", error.message);
+        console.error("submit_review error:", error.name, error.message);
         return {
           isError: true,
           content: [
@@ -231,6 +279,8 @@ return {
       }
     }
   );
+
+  // ---- get_file_content ----
   server.registerTool(
     "get_file_content",
     {
@@ -266,17 +316,29 @@ return {
       }
     },
 
-    async ({ path, ref, repository }) => {
+    async (args) => {
       try {
-        if (!repository) {
-          throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+        console.error(JSON.stringify({
+          tool: "get_file_content",
+          typeofArgs: typeof args,
+          argKeys: args ? Object.keys(args) : [],
+          repository: args?.repository
+        }));
+
+        const repository = args?.repository || DEFAULT_REPOSITORY;
+
+        if (!REPOSITORIES[repository]) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: "Unknown repository: " + repository + ". Allowed: " + Object.keys(REPOSITORIES).join(", ") }]
+          };
         }
-        const result = await getFileContent(env, path, ref, repository);
+
+        const result = await getFileContent(env, args?.path, args?.ref, repository);
 
         return {
           structuredContent: result,
 
-          // 这里直接返回原始源码，不再 JSON.stringify 整个对象
           content: [
             {
               type: "text",
@@ -294,7 +356,7 @@ return {
           ]
         };
       } catch (error) {
-        console.error("get_file_content error:", error.message);
+        console.error("get_file_content error:", error.name, error.message);
         return {
           isError: true,
           content: [
@@ -628,14 +690,12 @@ async function getFileContent(
     );
   }
 
-  // GitHub 的 Base64 内容中可能包含换行
   const cleanBase64 =
     file.content.replace(/\s/g, "");
 
   const bytes =
     Buffer.from(cleanBase64, "base64");
 
-  // 防止一次把过大的文件塞入 ChatGPT 上下文
   const MAX_FILE_BYTES = 500_000;
 
   if (bytes.byteLength > MAX_FILE_BYTES) {
@@ -679,11 +739,9 @@ async function getFileContent(
     path,
     encoding: "utf-8",
 
-    // GitHub 自己的 Blob SHA
     github_blob_sha:
       file.sha || "",
 
-    // 实际文件字节的 SHA-256
     sha256,
 
     byte_length:
@@ -763,5 +821,3 @@ function jsonResponse(data, status = 200) {
     }
   });
 }
-
-
