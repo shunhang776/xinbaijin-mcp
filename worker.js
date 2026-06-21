@@ -118,64 +118,66 @@ export function createServer(env) {
   server.registerTool(
     "get_patch",
     {
-     title: "Get commit patch",
-     description:
-  "读取指定提交的文件级 patch，供 ChatGPT 进行代码审查。" +
-  "涉及转义符、引号、Unicode、Base64、JSON 格式、" +
-  "文件末尾换行或编码问题时，不得仅根据 patch 下结论，" +
-  "必须调用 get_file_content 核实原始源码。",
-  inputSchema: GET_PATCH_SCHEMA,
-outputSchema: {
-  protocol: z.string(),
-  repository: z.string(),
-  branch: z.string(),
-  requested_ref: z.string(),
-  commit: z.string(),
-  message: z.string().nullable(),
-  stats: z.object({
-    additions: z.number(),
-    deletions: z.number(),
-    total: z.number()
-  }),
-  files: z.array(
-    z.object({
-      filename: z.string(),
-      previous_filename: z.string().nullable(),
-      status: z.string().nullable(),
-      additions: z.number(),
-      deletions: z.number(),
-      changes: z.number(),
-      patch_available: z.boolean(),
-      patch: z.string().nullable()
-    })
-  )
-},
-    annotations: {
-  readOnlyHint: true,
-  openWorldHint: false,
-  destructiveHint: false
-}
-  },
+      title: "Get commit metadata",
+      description:
+        "只读操作。读取指定提交的元数据、父提交和全部修改文件列表，" +
+        "不返回原始 patch 内容。审查具体修改时，应使用 get_file_content " +
+        "分别读取 base_commit 与 commit 对应的文件内容。",
+      inputSchema: GET_PATCH_SCHEMA,
+      outputSchema: {
+        protocol: z.string(),
+        repository: z.string(),
+        branch: z.string(),
+        requested_ref: z.string(),
+        commit: z.string(),
+        base_commit: z.string().nullable(),
+        message: z.string().nullable(),
+        stats: z.object({
+          additions: z.number(),
+          deletions: z.number(),
+          total: z.number()
+        }),
+        files: z.array(
+          z.object({
+            filename: z.string(),
+            previous_filename: z.string().nullable(),
+            status: z.string().nullable(),
+            additions: z.number(),
+            deletions: z.number(),
+            changes: z.number()
+          })
+        )
+      },
+      annotations: {
+        readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false
+      }
+    },
     async ({ sha, repository }) => {
       if (!repository) {
-        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+        throw new Error(
+          "repository is required. Choose xinbaijin or xinbaijin-mcp."
+        );
       }
-      try {
-       const patch = await getPatch(env, sha, repository);
 
-return {
-  structuredContent: patch,
-  content: [
-    {
-      type: "text",
-      text:
-        `已获取提交 ${patch.commit} 的 patch，` +
-        `共 ${patch.files.length} 个文件，` +
-        `新增 ${patch.stats.additions} 行，` +
-        `删除 ${patch.stats.deletions} 行。`
-    }
-  ]
-};
+      try {
+        const patch = await getPatch(env, sha, repository);
+
+        return {
+          structuredContent: patch,
+          content: [
+            {
+              type: "text",
+              text:
+                `已获取提交 ${patch.commit} 的元数据，` +
+                `父提交 ${patch.base_commit ?? "无"}，` +
+                `共 ${patch.files.length} 个修改文件，` +
+                `新增 ${patch.stats.additions} 行，` +
+                `删除 ${patch.stats.deletions} 行。`
+            }
+          ]
+        };
       } catch (error) {
         return {
           isError: true,
@@ -192,6 +194,7 @@ return {
       }
     }
   );
+
   server.registerTool(
     "submit_review",
     {
@@ -382,8 +385,17 @@ async function getLatestHandoff(env, repositoryName) {
   };
 }
 
-async function getPatch(env, requestedSha, repositoryName) {
-  const { owner, repo, branch, token } = getRepositoryConfig(env, repositoryName);
+async function getPatch(
+  env,
+  requestedSha,
+  repositoryName
+) {
+  const {
+    owner,
+    repo,
+    branch,
+    token
+  } = getRepositoryConfig(env, repositoryName);
 
   if (!token) {
     throw new Error(
@@ -397,7 +409,8 @@ async function getPatch(env, requestedSha, repositoryName) {
       : branch;
 
   const endpoint =
-    `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`;
+    `https://api.github.com/repos/${owner}/${repo}/commits/` +
+    encodeURIComponent(ref);
 
   const response = await fetch(endpoint, {
     headers: {
@@ -417,8 +430,13 @@ async function getPatch(env, requestedSha, repositoryName) {
   }
 
   const commit = await response.json();
+
   const files = Array.isArray(commit.files)
     ? commit.files
+    : [];
+
+  const parents = Array.isArray(commit.parents)
+    ? commit.parents
     : [];
 
   return {
@@ -427,6 +445,10 @@ async function getPatch(env, requestedSha, repositoryName) {
     branch,
     requested_ref: ref,
     commit: commit.sha || null,
+    base_commit:
+      parents.length > 0 && typeof parents[0]?.sha === "string"
+        ? parents[0].sha
+        : null,
     message: commit.commit?.message || null,
     stats: {
       additions: commit.stats?.additions ?? 0,
@@ -439,12 +461,7 @@ async function getPatch(env, requestedSha, repositoryName) {
       status: file.status || null,
       additions: file.additions ?? 0,
       deletions: file.deletions ?? 0,
-      changes: file.changes ?? 0,
-      patch_available: typeof file.patch === "string",
-      patch:
-        typeof file.patch === "string"
-          ? file.patch
-          : null
+      changes: file.changes ?? 0
     }))
   };
 }
