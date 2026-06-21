@@ -125,7 +125,7 @@ export function createServer(env) {
         "分别读取 base_commit 与 commit 对应的文件内容。",
       inputSchema: GET_PATCH_SCHEMA,
       outputSchema: {
-        protocol: z.string(),
+        protocol: z.literal("xinbaijin-patch/2.0"),
         repository: z.string(),
         branch: z.string(),
         requested_ref: z.string(),
@@ -440,7 +440,7 @@ async function getPatch(
     : [];
 
   return {
-    protocol: "xinbaijin-patch/1.0",
+    protocol: "xinbaijin-patch/2.0",
     repository: `${owner}/${repo}`,
     branch,
     requested_ref: ref,

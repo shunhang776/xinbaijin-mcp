@@ -228,3 +228,71 @@ describe("MCP tool safety annotations", () => {
     });
   });
 });
+// ---------------------------------------------------------------------------
+// get_patch response protocol
+// ---------------------------------------------------------------------------
+describe("get_patch response protocol", () => {
+  it("declares and returns xinbaijin-patch/2.0", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            sha: "b".repeat(40),
+            parents: [
+              {
+                sha: "a".repeat(40)
+              }
+            ],
+            commit: {
+              message: "test commit"
+            },
+            stats: {
+              additions: 1,
+              deletions: 0,
+              total: 1
+            },
+            files: []
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      )
+    );
+
+    createServer({ GITHUB_TOKEN: "test-token" });
+
+    const tool = registeredTools.find(
+      (item) => item.name === "get_patch"
+    );
+
+    expect(
+      tool.config.outputSchema.protocol.safeParse(
+        "xinbaijin-patch/2.0"
+      ).success
+    ).toBe(true);
+
+    expect(
+      tool.config.outputSchema.protocol.safeParse(
+        "xinbaijin-patch/1.0"
+      ).success
+    ).toBe(false);
+
+    const result = await tool.handler({
+      repository: "xinbaijin-mcp",
+      sha: "b".repeat(40)
+    });
+
+    expect(result.structuredContent.protocol).toBe(
+      "xinbaijin-patch/2.0"
+    );
+
+    expect(result.structuredContent.base_commit).toBe(
+      "a".repeat(40)
+    );
+  });
+});
