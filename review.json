@@ -3,10 +3,19 @@
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
   "reviewed_commit": "125c8a8a6d39ea0d1c9aaa3a74f2f891bcbeed2c",
-  "based_on_branch_head": "cd0dfc184b6bc11726344373476a5ebf7c44d5eb",
-  "verdict": "blocked",
-  "summary": "工具调用顺序错误，审查结果无效；正在重新核验。",
-  "findings": [],
+  "based_on_branch_head": "7869d24967d8456a899655125cc0a386eb2b6377",
+  "verdict": "changes_requested",
+  "summary": "get_patch 已改为仅返回安全元数据并提供 base_commit，仓库映射与只读边界保持正确；但响应字段发生不兼容变更时仍沿用 xinbaijin-patch/1.0，可能使现有客户端按旧契约解析失败，需要先处理协议兼容性。",
+  "findings": [
+    {
+      "severity": "medium",
+      "file": "worker.js",
+      "line": 442,
+      "title": "破坏性响应变更未升级协议版本",
+      "description": "本提交删除了 get_patch 响应中的 patch_available 和 patch 字段，并新增 base_commit，属于不兼容的响应契约变更；但运行时仍返回 protocol: \"xinbaijin-patch/1.0\"。依赖 1.0 旧字段的客户端、缓存的 MCP 工具描述或按 protocol 选择解析器的调用方可能在升级后直接失败，且无法通过协议值识别新旧格式。",
+      "recommendation": "将新元数据格式升级为新的协议版本（例如 xinbaijin-patch/2.0），同步更新 outputSchema、文档、调用方和兼容性测试；或者在 1.0 中暂时保留旧字段并标记弃用，再通过明确的版本迁移移除。"
+    }
+  ],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-21T14:48:57.175Z"
+  "reviewed_at": "2026-06-21T14:53:50.695Z"
 }
