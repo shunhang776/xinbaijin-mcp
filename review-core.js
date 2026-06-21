@@ -295,6 +295,10 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
       commit.sha || ""
     ).toLowerCase();
 
+    if (!isReviewOnlyCommit(commit)) {
+      return commit;
+    }
+
     if (totalWalkSteps >= MAX_TOTAL_WALK) {
       throw new Error(
         "Commit history too deep: exceeded " + MAX_TOTAL_WALK +
@@ -313,10 +317,6 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
 
     if (currentSha) {
       visited.add(currentSha);
-    }
-
-    if (!isReviewOnlyCommit(commit)) {
-      return commit;
     }
 
     const parentSha =
