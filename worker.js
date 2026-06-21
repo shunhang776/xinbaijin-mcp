@@ -1,4 +1,4 @@
-﻿import OAuthProvider from "@cloudflare/workers-oauth-provider";
+import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { GitHubHandler } from "./oauth/github-handler.ts";
 import { createMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -58,17 +58,31 @@ export default {
 };
 
 export function createServer(env) {
-  const server = new McpServer({
+  const server = new McpServer(
+  {
     name: "xinbaijin-mcp",
     version: "1.0.0"
-  });
+  },
+  {
+    instructions:
+      "get_latest_handoff、get_patch 和 get_file_content 是只读工具，" +
+      "只读取允许列表中的 GitHub 仓库，不修改任何文件。" +
+      "submit_review 是唯一写入工具，只能写入目标仓库根目录的 review.json。"
+  }
+);
 
   server.registerTool(
     "get_latest_handoff",
     {
+      title: "Get latest repository handoff",
       description:
         "读取目标仓库（必填）dev 分支的最新提交，并生成标准化 handoff。",
-      inputSchema: GET_LATEST_HANDOFF_SCHEMA
+      inputSchema: GET_LATEST_HANDOFF_SCHEMA,
+      annotations: {
+  readOnlyHint: true,
+  openWorldHint: false,
+  destructiveHint: false
+}
     },
     async ({ repository }) => {
       if (!repository) {
@@ -104,6 +118,7 @@ export function createServer(env) {
   server.registerTool(
     "get_patch",
     {
+     title: "Get commit patch",
      description:
   "读取指定提交的文件级 patch，供 ChatGPT 进行代码审查。" +
   "涉及转义符、引号、Unicode、Base64、JSON 格式、" +
@@ -136,8 +151,10 @@ outputSchema: {
   )
 },
     annotations: {
-      readOnlyHint: true
-    }
+  readOnlyHint: true,
+  openWorldHint: false,
+  destructiveHint: false
+}
   },
     async ({ sha, repository }) => {
       if (!repository) {
@@ -178,9 +195,17 @@ return {
   server.registerTool(
     "submit_review",
     {
-      description:
-        "将 ChatGPT 的代码审查结果写入目标仓库（必填）dev 分支根目录 review.json。此工具只能写 review.json，不能修改源代码。",
-      inputSchema: SUBMIT_REVIEW_SCHEMA
+      title: "Submit code review",
+
+    description:
+  "写入操作。只允许将代码审查结果写入所选允许仓库 dev 分支根目录的 review.json，" +
+  "不能修改其他源码文件。执行前应获得用户许可。",
+      inputSchema: SUBMIT_REVIEW_SCHEMA,
+      annotations: {
+  readOnlyHint: false,
+  openWorldHint: false,
+  destructiveHint: true
+},
     },
     async ({ repository, ...input }) => {
       if (!repository) {
@@ -216,6 +241,7 @@ return {
   server.registerTool(
     "get_file_content",
     {
+      title: "Read repository file",
       description:
         "读取指定 Git 提交中的原始 UTF-8 文件内容，并返回 SHA-256、字节长度、行尾类型等校验信息。" +
         "当审查涉及转义符、引号、Unicode、Base64、JSON 格式、文件末尾换行或编码时，" +
@@ -243,9 +269,11 @@ return {
         content: z.string()
       },
 
-      annotations: {
-        readOnlyHint: true
-      }
+    annotations: {
+  readOnlyHint: true,
+  openWorldHint: false,
+  destructiveHint: false
+}
     },
 
     async ({ path, ref, repository }) => {
