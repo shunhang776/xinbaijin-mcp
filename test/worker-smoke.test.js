@@ -4,10 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Shared capture array — must use vi.hoisted() so the vi.mock factory
 // (which runs before all imports) can close over it.
 // ---------------------------------------------------------------------------
-const { registeredTools } = vi.hoisted(() => {
-  return { registeredTools: [] };
+const { registeredTools, oauthProviderConfigs } = vi.hoisted(() => {
+  return {
+    registeredTools: [],
+    oauthProviderConfigs: []
+  };
 });
-
 // ---------------------------------------------------------------------------
 // Mock Cloudflare-specific modules BEFORE any imports from worker.js.
 // These are hoisted by Vitest to the top of the file.
@@ -15,7 +17,25 @@ const { registeredTools } = vi.hoisted(() => {
 vi.mock("agents/mcp", () => ({
   createMcpHandler: vi.fn(() => () => new Response("ok"))
 }));
+vi.mock("@cloudflare/workers-oauth-provider", () => ({
+  default: class MockOAuthProvider {
+    constructor(config) {
+      oauthProviderConfigs.push(config);
+    }
 
+    async fetch() {
+      return new Response("oauth mock", {
+        status: 200
+      });
+    }
+  }
+}));
+
+vi.mock("../oauth/github-handler.ts", () => ({
+  GitHubHandler: {
+    fetch: vi.fn()
+  }
+}));
 vi.mock("@modelcontextprotocol/sdk/server/mcp.js", () => ({
   McpServer: class {
     constructor(serverInfo, _options) {
@@ -161,53 +181,19 @@ describe("Worker smoke test", () => {
 });
 
 // ---------------------------------------------------------------------------
-// /mcp authentication — inline auth logic tests
+// OAuth provider wiring
 // ---------------------------------------------------------------------------
-describe("/mcp authentication", () => {
-  // Replicate the auth check from worker.js fetch handler:
-  //   const expectedToken = env.MCP_ACCESS_TOKEN;
-  //   if (!expectedToken) → 500
-  //   if (authHeader !== "Bearer " + expectedToken) → 401
-  function checkAuth(env, authHeader) {
-    const expectedToken = env.MCP_ACCESS_TOKEN;
-    if (!expectedToken) {
-      return { status: 500, ok: false, error: "MCP_ACCESS_TOKEN is not configured on this Worker." };
-    }
-    const header = (authHeader || "").trim();
-    if (header !== "Bearer " + expectedToken) {
-      return { status: 401, ok: false, error: "Unauthorized." };
-    }
-    return { status: 200, ok: true };
-  }
+describe("OAuth provider configuration", () => {
+  it("protects /mcp with the expected OAuth endpoints", () => {
+    expect(oauthProviderConfigs).toHaveLength(1);
 
-  it("returns 500 when MCP_ACCESS_TOKEN is not configured", () => {
-    const result = checkAuth({}, "Bearer some-token");
-    expect(result.status).toBe(500);
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain("MCP_ACCESS_TOKEN");
-  });
+    const config = oauthProviderConfigs[0];
 
-  it("returns 401 when Authorization header is missing", () => {
-    const result = checkAuth({ MCP_ACCESS_TOKEN: "secret" }, "");
-    expect(result.status).toBe(401);
-    expect(result.error).toContain("Unauthorized");
-  });
-
-  it("returns 401 when token is wrong", () => {
-    const result = checkAuth(
-      { MCP_ACCESS_TOKEN: "correct" },
-      "Bearer wrong-token"
-    );
-    expect(result.status).toBe(401);
-    expect(result.error).toContain("Unauthorized");
-  });
-
-  it("returns 200 when token matches", () => {
-    const result = checkAuth(
-      { MCP_ACCESS_TOKEN: "my-secret" },
-      "Bearer my-secret"
-    );
-    expect(result.status).toBe(200);
-    expect(result.ok).toBe(true);
+    expect(config.apiRoute).toBe("/mcp");
+    expect(config.authorizeEndpoint).toBe("/authorize");
+    expect(config.tokenEndpoint).toBe("/token");
+    expect(config.clientRegistrationEndpoint).toBe("/register");
+    expect(config.apiHandler).toBeDefined();
+    expect(config.defaultHandler).toBeDefined();
   });
 });
