@@ -2,11 +2,11 @@
   "protocol": "xinbaijin-review/1.0",
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
-  "reviewed_commit": "f7866242e533079184214c81f4e9ea36f750426a",
-  "based_on_branch_head": "f7866242e533079184214c81f4e9ea36f750426a",
-  "verdict": "approved",
-  "summary": "审查了 xinbaijin-mcp 仓库 dev 分支提交 f7866242e533079184214c81f4e9ea36f750426a 的全部修改文件：review-core.js、worker.js、test/multi-repo.test.js。变更将仓库配置集中到白名单 REPOSITORIES，通过显式 repository 参数在线程中贯穿 handoff、patch、file content 与 submit review 路径，并补充多仓库一致性和默认仓库保护测试。未发现正确性、安全性、边界条件、异常处理、并发保护或潜在回归方面的阻塞问题。",
+  "reviewed_commit": "9651788a3310d6a9bdc1047b9b4427ac21c22792",
+  "based_on_branch_head": "9651788a3310d6a9bdc1047b9b4427ac21c22792",
+  "verdict": "blocked",
+  "summary": "无法可靠完成代码审查：get_patch 对提交 9651788a3310d6a9bdc1047b9b4427ac21c22792 的两次调用均被 OpenAI 安全检查屏蔽，因此未能读取 worker.js 与 test/worker-smoke.test.js 的补丁内容，无法形成有代码证据支持的 findings。",
   "findings": [],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-20T19:25:00.020Z"
+  "reviewed_at": "2026-06-21T14:09:57.400Z"
 }
