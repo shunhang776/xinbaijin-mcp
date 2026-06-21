@@ -7,3 +7,8 @@ compatibility_flags = ["nodejs_compat"]
 #   MCP_ACCESS_TOKEN       — Bearer token for ChatGPT MCP connector auth
 #   GITHUB_TOKEN           — Contents: Read and write on both repos
 #   BRANCH_PROTECTION_TOKEN — Administration: Read for pre-deploy check
+[[kv_namespaces]]
+
+binding = "OAUTH_KV"
+
+id = "5c82c72b3d7643fc8c93d2bd421ead6b"

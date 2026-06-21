@@ -1,4 +1,5 @@
-
+﻿import OAuthProvider from "@cloudflare/workers-oauth-provider";
+import { GitHubHandler } from "./oauth/github-handler.ts";
 import { createMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -8,35 +9,28 @@ import { REPOSITORIES, DEFAULT_REPOSITORY, submitReview, getRepositoryConfig, gi
 import { REPOSITORY_PARAM, GET_LATEST_HANDOFF_SCHEMA, GET_PATCH_SCHEMA, SUBMIT_REVIEW_SCHEMA, GET_FILE_CONTENT_SCHEMA } from "./mcp-schemas.js";
 export { REPOSITORY_PARAM, GET_LATEST_HANDOFF_SCHEMA, GET_PATCH_SCHEMA, SUBMIT_REVIEW_SCHEMA, GET_FILE_CONTENT_SCHEMA };
 
+  const mcpApiHandler = {
+  async fetch(request, env, ctx) {
+    const server = createServer(env);
+
+    return createMcpHandler(server, {
+      route: "/mcp"
+    })(request, env, ctx);
+  }
+};
+
+const oauthProvider = new OAuthProvider({
+  apiRoute: "/mcp",
+  apiHandler: mcpApiHandler,
+  authorizeEndpoint: "/authorize",
+  tokenEndpoint: "/token",
+  clientRegistrationEndpoint: "/register",
+  defaultHandler: GitHubHandler
+});
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-
-    // ChatGPT MCP 连接入口 — 需要 Bearer Token 认证
-    if (url.pathname === "/mcp") {
-      const expectedToken = env.MCP_ACCESS_TOKEN;
-
-      if (!expectedToken) {
-        return jsonResponse(
-          { ok: false, error: "MCP_ACCESS_TOKEN is not configured on this Worker." },
-          500
-        );
-      }
-
-      const authHeader = (request.headers.get("Authorization") || "").trim();
-      if (authHeader !== `Bearer ${expectedToken}`) {
-        return jsonResponse(
-          { ok: false, error: "Unauthorized. Set Authorization: Bearer <MCP_ACCESS_TOKEN>." },
-          401
-        );
-      }
-
-      const server = createServer(env);
-
-      return createMcpHandler(server, {
-        route: "/mcp"
-      })(request, env, ctx);
-    }
 
     // 浏览器健康检查
     if (request.method === "GET" && url.pathname === "/") {
@@ -45,11 +39,12 @@ export default {
         service: "xinbaijin-mcp",
         role: "gateway-and-mcp",
         status: "running",
-        mcp_endpoint: "/mcp"
+        mcp_endpoint: "/mcp",
+        authentication: "oauth"
       });
     }
 
-    // GitHub Webhook 入口
+    // 保留现有 GitHub Webhook
     if (
       request.method === "POST" &&
       (url.pathname === "/" || url.pathname === "/webhook")
@@ -57,17 +52,8 @@ export default {
       return handleWebhook(request);
     }
 
-    if (request.method !== "GET" && request.method !== "POST") {
-      return jsonResponse(
-        { ok: false, error: "Method not allowed" },
-        405
-      );
-    }
-
-    return jsonResponse(
-      { ok: false, error: "Not found" },
-      404
-    );
+    // /mcp、/authorize、/callback、/token、/register 交给 OAuthProvider
+    return oauthProvider.fetch(request, env, ctx);
   }
 };
 
