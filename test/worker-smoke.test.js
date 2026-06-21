@@ -197,3 +197,34 @@ describe("OAuth provider configuration", () => {
     expect(config.defaultHandler).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// MCP tool safety annotations
+// ---------------------------------------------------------------------------
+describe("MCP tool safety annotations", () => {
+  it("declares accurate safety annotations for all MCP tools", () => {
+    createServer({ GITHUB_TOKEN: "test-token" });
+
+    const tools = Object.fromEntries(
+      registeredTools.map((tool) => [tool.name, tool])
+    );
+
+    for (const name of [
+      "get_latest_handoff",
+      "get_patch",
+      "get_file_content"
+    ]) {
+      expect(tools[name].config.annotations).toEqual({
+        readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false
+      });
+    }
+
+    expect(tools.submit_review.config.annotations).toEqual({
+      readOnlyHint: false,
+      openWorldHint: false,
+      destructiveHint: true
+    });
+  });
+});
