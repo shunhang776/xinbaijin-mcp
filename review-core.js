@@ -188,6 +188,7 @@ async function isAncestorCommit(
 }
 
 async function getLatestReviewableCommit(env, startRef, repositoryName) {
+  const MAX_TOTAL_WALK = 100; // unified cap for both fast-path and fallback
   const { branch } = getRepositoryConfig(env, repositoryName);
 
   const initialRef = startRef || branch;
@@ -197,6 +198,10 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
   if (!isReviewOnlyCommit(commit)) {
     return commit;
   }
+
+  // Shared state: walker and counter reused across fast-path and fallback
+  let walker = null;
+  let totalWalkSteps = 0;
 
   // Fast path: a review-only head contains the exact code commit
   // that was reviewed. Validate that the target exists, is a code
@@ -234,18 +239,15 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
         // Verify every commit between branch head and candidate
         // is review-only. If any non-review-only commit sits between
         // them, the candidate is stale and we must walk parents.
-        // Capped at MAX_FAST_PATH_WALK to avoid pathological chains.
-        const MAX_FAST_PATH_WALK = 50;
-        let walker = commit;
+        // Shares totalWalkSteps with fallback to enforce a unified cap.
+        walker = commit;
         const walkVisited = new Set();
         let fastPathValid = true;
-        let walkSteps = 0;
 
         while (true) {
           const walkerSha = String(walker.sha || "").toLowerCase();
           if (walkerSha === reviewedCommit) break; // reached candidate
-          if (walkSteps >= MAX_FAST_PATH_WALK) {
-            // Chain too long — fall through to parent traversal
+          if (totalWalkSteps >= MAX_TOTAL_WALK) {
             fastPathValid = false;
             break;
           }
@@ -254,7 +256,7 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
             break;
           }
           walkVisited.add(walkerSha);
-          walkSteps++;
+          totalWalkSteps++;
 
           if (!isReviewOnlyCommit(walker)) {
             fastPathValid = false;
@@ -279,14 +281,26 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
     }
   }
 
-  // Fallback: follow first parents without a fixed depth limit.
-  // A visited set prevents malformed history from looping forever.
+  // Fast path did not return — resume from walker position to avoid
+  // re-reading commits the fast path already checked.
+  if (walker && walker.sha) {
+    commit = walker;
+  }
+
+  // Fallback: follow first parents. Shares totalWalkSteps with fast path.
   const visited = new Set();
 
   while (true) {
     const currentSha = String(
       commit.sha || ""
     ).toLowerCase();
+
+    if (totalWalkSteps >= MAX_TOTAL_WALK) {
+      throw new Error(
+        "Commit history too deep: exceeded " + MAX_TOTAL_WALK +
+        " parent traversals while searching for the latest code commit."
+      );
+    }
 
     if (
       currentSha &&
@@ -314,6 +328,7 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
       );
     }
 
+    totalWalkSteps++;
     commit =
       await getCommitDetails(
         env,

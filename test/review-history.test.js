@@ -81,7 +81,7 @@ describe(
     it(
       "uses review.json metadata to jump across a long review-only history",
       async () => {
-        const headSha = sha(1000);
+        const headSha = sha(30);
         const codeSha = sha(1);
 
         const metadata = Buffer.from(
@@ -107,7 +107,7 @@ describe(
               return json(
                 reviewCommit(
                   headSha,
-                  sha(999)
+                  sha(29)
                 )
               );
             }

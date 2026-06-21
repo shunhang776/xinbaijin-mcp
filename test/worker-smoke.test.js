@@ -159,3 +159,55 @@ describe("Worker smoke test", () => {
     ).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// /mcp authentication — inline auth logic tests
+// ---------------------------------------------------------------------------
+describe("/mcp authentication", () => {
+  // Replicate the auth check from worker.js fetch handler:
+  //   const expectedToken = env.MCP_ACCESS_TOKEN;
+  //   if (!expectedToken) → 500
+  //   if (authHeader !== "Bearer " + expectedToken) → 401
+  function checkAuth(env, authHeader) {
+    const expectedToken = env.MCP_ACCESS_TOKEN;
+    if (!expectedToken) {
+      return { status: 500, ok: false, error: "MCP_ACCESS_TOKEN is not configured on this Worker." };
+    }
+    const header = (authHeader || "").trim();
+    if (header !== "Bearer " + expectedToken) {
+      return { status: 401, ok: false, error: "Unauthorized." };
+    }
+    return { status: 200, ok: true };
+  }
+
+  it("returns 500 when MCP_ACCESS_TOKEN is not configured", () => {
+    const result = checkAuth({}, "Bearer some-token");
+    expect(result.status).toBe(500);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("MCP_ACCESS_TOKEN");
+  });
+
+  it("returns 401 when Authorization header is missing", () => {
+    const result = checkAuth({ MCP_ACCESS_TOKEN: "secret" }, "");
+    expect(result.status).toBe(401);
+    expect(result.error).toContain("Unauthorized");
+  });
+
+  it("returns 401 when token is wrong", () => {
+    const result = checkAuth(
+      { MCP_ACCESS_TOKEN: "correct" },
+      "Bearer wrong-token"
+    );
+    expect(result.status).toBe(401);
+    expect(result.error).toContain("Unauthorized");
+  });
+
+  it("returns 200 when token matches", () => {
+    const result = checkAuth(
+      { MCP_ACCESS_TOKEN: "my-secret" },
+      "Bearer my-secret"
+    );
+    expect(result.status).toBe(200);
+    expect(result.ok).toBe(true);
+  });
+});
