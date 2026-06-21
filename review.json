@@ -3,10 +3,10 @@
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
   "reviewed_commit": "125c8a8a6d39ea0d1c9aaa3a74f2f891bcbeed2c",
-  "based_on_branch_head": "125c8a8a6d39ea0d1c9aaa3a74f2f891bcbeed2c",
+  "based_on_branch_head": "cd0dfc184b6bc11726344373476a5ebf7c44d5eb",
   "verdict": "blocked",
-  "summary": "占位，不应执行。",
+  "summary": "工具调用顺序错误，审查结果无效；正在重新核验。",
   "findings": [],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-21T14:48:41.795Z"
+  "reviewed_at": "2026-06-21T14:48:57.175Z"
 }
