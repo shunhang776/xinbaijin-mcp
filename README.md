@@ -14,10 +14,20 @@ This runs the branch protection check before deploying. Direct `wrangler deploy`
 
 | Variable | Purpose | Required Permission |
 |---|---|---|
-| `GITHUB_TOKEN` | Runtime: read/write repo contents, create commits | Contents: Read and write |
+| `MCP_ACCESS_TOKEN` | **Required.** Authenticates ChatGPT MCP connector to the Worker. Shared secret sent as `Authorization: Bearer <token>` header. | N/A (arbitrary secret) |
+| `GITHUB_TOKEN` | Runtime: read/write repo contents, create commits, submit reviews | Contents: Read and write |
 | `BRANCH_PROTECTION_TOKEN` | Pre-deploy: verify branch protection rules | Administration: Read (repo) |
 
-`BRANCH_PROTECTION_TOKEN` can be the same token as `GITHUB_TOKEN` if it has Administration: Read permission. For least-privilege, use separate tokens.
+Set all three via `wrangler secret put`:
+```bash
+npx wrangler secret put MCP_ACCESS_TOKEN
+npx wrangler secret put GITHUB_TOKEN
+npx wrangler secret put BRANCH_PROTECTION_TOKEN
+```
+
+### ChatGPT MCP Connector Setup
+
+After deployment, configure the ChatGPT MCP connector with the Worker URL, an `Authorization` header, and the `MCP_ACCESS_TOKEN` value. Without this, all `/mcp` requests return `401 Unauthorized`.
 
 ### Branch Protection Requirements
 

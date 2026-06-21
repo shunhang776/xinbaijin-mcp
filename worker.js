@@ -12,8 +12,25 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // ChatGPT MCP 连接入口
+    // ChatGPT MCP 连接入口 — 需要 Bearer Token 认证
     if (url.pathname === "/mcp") {
+      const expectedToken = env.MCP_ACCESS_TOKEN;
+
+      if (!expectedToken) {
+        return jsonResponse(
+          { ok: false, error: "MCP_ACCESS_TOKEN is not configured on this Worker." },
+          500
+        );
+      }
+
+      const authHeader = (request.headers.get("Authorization") || "").trim();
+      if (authHeader !== `Bearer ${expectedToken}`) {
+        return jsonResponse(
+          { ok: false, error: "Unauthorized. Set Authorization: Bearer <MCP_ACCESS_TOKEN>." },
+          401
+        );
+      }
+
       const server = createServer(env);
 
       return createMcpHandler(server, {

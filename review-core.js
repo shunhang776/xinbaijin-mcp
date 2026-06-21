@@ -234,18 +234,27 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
         // Verify every commit between branch head and candidate
         // is review-only. If any non-review-only commit sits between
         // them, the candidate is stale and we must walk parents.
+        // Capped at MAX_FAST_PATH_WALK to avoid pathological chains.
+        const MAX_FAST_PATH_WALK = 50;
         let walker = commit;
         const walkVisited = new Set();
         let fastPathValid = true;
+        let walkSteps = 0;
 
         while (true) {
           const walkerSha = String(walker.sha || "").toLowerCase();
           if (walkerSha === reviewedCommit) break; // reached candidate
+          if (walkSteps >= MAX_FAST_PATH_WALK) {
+            // Chain too long — fall through to parent traversal
+            fastPathValid = false;
+            break;
+          }
           if (!walkerSha || walkVisited.has(walkerSha)) {
             fastPathValid = false;
             break;
           }
           walkVisited.add(walkerSha);
+          walkSteps++;
 
           if (!isReviewOnlyCommit(walker)) {
             fastPathValid = false;

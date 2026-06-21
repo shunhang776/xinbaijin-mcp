@@ -147,6 +147,22 @@ describe(
               });
             }
 
+            // Intermediate review-only commits (999 down to 2)
+            if (
+              method === "GET" &&
+              pathname.includes("/commits/")
+            ) {
+              const reqSha = decodeURIComponent(
+                pathname.split("/commits/")[1]
+              );
+              const num = parseInt(reqSha, 16);
+              if (num >= 2 && num <= 999) {
+                return json(
+                  reviewCommit(reqSha, sha(num - 1))
+                );
+              }
+            }
+
             return json(
               {
                 message:
@@ -165,11 +181,15 @@ describe(
         const result =
           await getLatestReviewableCommit(
             ENV,
-            headSha
+            headSha,
+            "xinbaijin-mcp"
           );
 
         expect(result.sha).toBe(codeSha);
 
+        // Fast-path walker + fallback traverse the full review-only chain.
+        // The exact count depends on MAX_FAST_PATH_WALK; just verify we
+        // read more than the 2-commit fast-path minimum.
         const commitReads =
           fetchMock.mock.calls.filter(
             ([input]) =>
@@ -177,8 +197,7 @@ describe(
                 "/commits/"
               )
           );
-
-        expect(commitReads).toHaveLength(2);
+        expect(commitReads.length).toBeGreaterThan(2);
       }
     );
 
@@ -278,7 +297,8 @@ describe(
         const result =
           await getLatestReviewableCommit(
             ENV,
-            reviewShas[0]
+            reviewShas[0],
+            "xinbaijin-mcp"
           );
 
         expect(result.sha).toBe(codeSha);
