@@ -2,3 +2,8 @@
 main = "worker.js"
 compatibility_date = "2026-06-20"
 compatibility_flags = ["nodejs_compat"]
+
+# Required secrets (set via `npx wrangler secret put`):
+#   MCP_ACCESS_TOKEN       — Bearer token for ChatGPT MCP connector auth
+#   GITHUB_TOKEN           — Contents: Read and write on both repos
+#   BRANCH_PROTECTION_TOKEN — Administration: Read for pre-deploy check

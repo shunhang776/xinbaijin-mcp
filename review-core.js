@@ -1,3 +1,4 @@
+// 白名单仓库配置 — 唯一入口，所有仓库解析必须经过此处
 const REPOSITORIES = Object.freeze({
   xinbaijin: {
     owner: "shunhang776",
@@ -11,23 +12,32 @@ const REPOSITORIES = Object.freeze({
   }
 });
 
+// Canonical repository name list — single source of truth for whitelist.
+// mcp-schemas.js derives its Zod enum from this array.
+export const REPOSITORY_NAMES = Object.freeze(Object.keys(REPOSITORIES));
+
 const DEFAULT_REPOSITORY = "xinbaijin";
 
 function getRepositoryConfig(env, repositoryName) {
-  const name = repositoryName || DEFAULT_REPOSITORY;
-  const config = REPOSITORIES[name];
+  if (!repositoryName) {
+    throw new Error(
+      "repository is required. Choose xinbaijin or xinbaijin-mcp."
+    );
+  }
+  const name = repositoryName;
+  const repoConfig = REPOSITORIES[name];
 
-  if (!config) {
+  if (!repoConfig) {
     throw new Error(
       `Unknown repository: "${name}". ` +
-      `Allowed repositories: ${Object.keys(REPOSITORIES).sort().join(", ")}.`
+      `Allowed: ${Object.keys(REPOSITORIES).join(", ")}`
     );
   }
 
   return {
-    owner: config.owner,
-    repo: config.repo,
-    branch: config.branch,
+    owner: repoConfig.owner,
+    repo: repoConfig.repo,
+    branch: repoConfig.branch,
     token: env.GITHUB_TOKEN
   };
 }
@@ -178,6 +188,7 @@ async function isAncestorCommit(
 }
 
 async function getLatestReviewableCommit(env, startRef, repositoryName) {
+  const MAX_TOTAL_WALK = 100; // unified cap for both fast-path and fallback
   const { branch } = getRepositoryConfig(env, repositoryName);
 
   const initialRef = startRef || branch;
@@ -187,6 +198,10 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
   if (!isReviewOnlyCommit(commit)) {
     return commit;
   }
+
+  // Shared state: walker and counter reused across fast-path and fallback
+  let walker = null;
+  let totalWalkSteps = 0;
 
   // Fast path: a review-only head contains the exact code commit
   // that was reviewed. Validate that the target exists, is a code
@@ -216,24 +231,80 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
         );
 
       if (
-        reachable &&
-        !isReviewOnlyCommit(candidate)
+        !reachable ||
+        isReviewOnlyCommit(candidate)
       ) {
-        return candidate;
+        // Fall through to parent traversal.
+      } else {
+        // Verify every commit between branch head and candidate
+        // is review-only. If any non-review-only commit sits between
+        // them, the candidate is stale and we must walk parents.
+        // Shares totalWalkSteps with fallback to enforce a unified cap.
+        walker = commit;
+        const walkVisited = new Set();
+        let fastPathValid = true;
+
+        while (true) {
+          const walkerSha = String(walker.sha || "").toLowerCase();
+          if (walkerSha === reviewedCommit) break; // reached candidate
+          if (totalWalkSteps >= MAX_TOTAL_WALK) {
+            fastPathValid = false;
+            break;
+          }
+          if (!walkerSha || walkVisited.has(walkerSha)) {
+            fastPathValid = false;
+            break;
+          }
+          walkVisited.add(walkerSha);
+          totalWalkSteps++;
+
+          if (!isReviewOnlyCommit(walker)) {
+            fastPathValid = false;
+            break;
+          }
+
+          const walkerParent = walker.parents?.[0]?.sha;
+          if (!walkerParent) {
+            fastPathValid = false;
+            break;
+          }
+
+          walker = await getCommitDetails(env, walkerParent, repositoryName);
+        }
+
+        if (fastPathValid) {
+          return candidate;
+        }
       }
     } catch {
       // Fall back to parent traversal below.
     }
   }
 
-  // Fallback: follow first parents without a fixed depth limit.
-  // A visited set prevents malformed history from looping forever.
+  // Fast path did not return — resume from walker position to avoid
+  // re-reading commits the fast path already checked.
+  if (walker && walker.sha) {
+    commit = walker;
+  }
+
+  // Fallback: follow first parents. Shares totalWalkSteps with fast path.
   const visited = new Set();
 
   while (true) {
     const currentSha = String(
       commit.sha || ""
     ).toLowerCase();
+
+    if (!isReviewOnlyCommit(commit)) {
+      return commit;
+    }
+
+    if (totalWalkSteps >= MAX_TOTAL_WALK) {
+      throw new Error(
+        "Commit history too deep: exceeded " + MAX_TOTAL_WALK +
+        " parent traversals while searching for the latest code commit."
+      );
+    }
 
     if (
       currentSha &&
@@ -248,10 +319,6 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
       visited.add(currentSha);
     }
 
-    if (!isReviewOnlyCommit(commit)) {
-      return commit;
-    }
-
     const parentSha =
       commit.parents?.[0]?.sha;
 
@@ -261,6 +328,7 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
       );
     }
 
+    totalWalkSteps++;
     commit =
       await getCommitDetails(
         env,
@@ -269,6 +337,7 @@ async function getLatestReviewableCommit(env, startRef, repositoryName) {
       );
   }
 }
+
 async function getExistingReviewFileSha(env, repositoryName) {
   const { owner, repo, branch, token } =
     getRepositoryConfig(env, repositoryName);
@@ -448,10 +517,35 @@ async function createReviewGitCommit(
 async function updateBranchRefFastForward(
   env,
   newCommitSha,
+  expectedParentSha,
   repositoryName
 ) {
   const { owner, repo, branch, token } =
     getRepositoryConfig(env, repositoryName);
+
+  // Defense-in-depth: re-read branch head immediately before PATCH.
+  // Shrinks the race window. Combined with force:false this ensures
+  // the new commit is a descendant of the current tip.
+  //
+  // NOTE: The re-read + PATCH below is NOT an atomic compare-and-swap.
+  // A race window remains between the re-read and the PATCH where another
+  // actor could force-push dev to an ancestor. The review commit would
+  // still be a descendant of that ancestor, so force:false might allow it.
+  //
+  // Required operational mitigations:
+  //   - Enable branch protection on dev: no force-push, no deletion.
+  //   - Ensure submit_review has a single serial writer (no concurrent
+  //     review submissions against the same branch).
+  //
+  // These together close the residual TOCTOU window.
+  const currentHead = await getBranchHeadSha(env, repositoryName);
+
+  if (currentHead !== expectedParentSha) {
+    throw new Error(
+      "Concurrent branch update detected. The review was not published. " +
+      "Run get_latest_handoff and get_patch again before resubmitting."
+    );
+  }
 
   const endpoint =
     `https://api.github.com/repos/${owner}/${repo}` +
@@ -497,7 +591,8 @@ async function submitReview(env, input, repositoryName) {
     );
   }
 
-  // 固定本次写入所基于的分支头。后续所有校验和提交都基于这个不可变 SHA。
+  // 固定本次写入所基于的分支头。后续所有校验和提交都基于这个不可变 SHA，
+  // 全部使用同一个 repositoryName，禁止跨仓库读写。
   const branchHead =
     await getBranchHeadSha(env, repositoryName);
 
@@ -556,6 +651,7 @@ async function submitReview(env, input, repositoryName) {
   await updateBranchRefFastForward(
     env,
     created.commitSha,
+    branchHead,
     repositoryName
   );
 
@@ -573,11 +669,12 @@ async function submitReview(env, input, repositoryName) {
     message: "review.json updated successfully"
   };
 }
+
 export {
+  REPOSITORIES,
+  DEFAULT_REPOSITORY,
+  getRepositoryConfig,
   submitReview,
   getLatestReviewableCommit,
-  getRepositoryConfig,
-  githubHeaders,
-  REPOSITORIES,
-  DEFAULT_REPOSITORY
+  githubHeaders
 };

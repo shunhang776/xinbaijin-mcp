@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
+    "predeploy": "npm run check:branch-protection",
+    "check:branch-protection": "node scripts/check-branch-protection.js",
     "test": "vitest run"
   },
   "dependencies": {

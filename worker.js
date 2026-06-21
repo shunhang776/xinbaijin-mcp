@@ -3,14 +3,34 @@ import { createMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Buffer } from "node:buffer";
-import { submitReview, getRepositoryConfig, githubHeaders } from "./review-core.js";
+import { REPOSITORIES, DEFAULT_REPOSITORY, submitReview, getRepositoryConfig, githubHeaders } from "./review-core.js";
+
+import { REPOSITORY_PARAM, GET_LATEST_HANDOFF_SCHEMA, GET_PATCH_SCHEMA, SUBMIT_REVIEW_SCHEMA, GET_FILE_CONTENT_SCHEMA } from "./mcp-schemas.js";
+export { REPOSITORY_PARAM, GET_LATEST_HANDOFF_SCHEMA, GET_PATCH_SCHEMA, SUBMIT_REVIEW_SCHEMA, GET_FILE_CONTENT_SCHEMA };
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // ChatGPT MCP 连接入口
+    // ChatGPT MCP 连接入口 — 需要 Bearer Token 认证
     if (url.pathname === "/mcp") {
+      const expectedToken = env.MCP_ACCESS_TOKEN;
+
+      if (!expectedToken) {
+        return jsonResponse(
+          { ok: false, error: "MCP_ACCESS_TOKEN is not configured on this Worker." },
+          500
+        );
+      }
+
+      const authHeader = (request.headers.get("Authorization") || "").trim();
+      if (authHeader !== `Bearer ${expectedToken}`) {
+        return jsonResponse(
+          { ok: false, error: "Unauthorized. Set Authorization: Bearer <MCP_ACCESS_TOKEN>." },
+          401
+        );
+      }
+
       const server = createServer(env);
 
       return createMcpHandler(server, {
@@ -51,7 +71,7 @@ export default {
   }
 };
 
-function createServer(env) {
+export function createServer(env) {
   const server = new McpServer({
     name: "xinbaijin-mcp",
     version: "1.0.0"
@@ -61,15 +81,13 @@ function createServer(env) {
     "get_latest_handoff",
     {
       description:
-        "读取指定仓库 dev 分支的最新提交，并生成标准化 handoff。" +
-        "默认仓库为 xinbaijin。",
-      inputSchema: z.object({
-        repository: z.enum(["xinbaijin", "xinbaijin-mcp"])
-          .optional()
-          .describe("目标仓库。省略时默认使用 xinbaijin。")
-      })
+        "读取目标仓库（必填）dev 分支的最新提交，并生成标准化 handoff。",
+      inputSchema: GET_LATEST_HANDOFF_SCHEMA
     },
     async ({ repository }) => {
+      if (!repository) {
+        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+      }
       try {
         const handoff = await getLatestHandoff(env, repository);
 
@@ -105,17 +123,7 @@ function createServer(env) {
   "涉及转义符、引号、Unicode、Base64、JSON 格式、" +
   "文件末尾换行或编码问题时，不得仅根据 patch 下结论，" +
   "必须调用 get_file_content 核实原始源码。",
-  inputSchema: z.object({
-  sha: z
-    .string()
-    .trim()
-    .min(7)
-    .optional()
-    .describe("可选提交 SHA；省略时读取 dev 分支最新提交。"),
-  repository: z.enum(["xinbaijin", "xinbaijin-mcp"])
-    .optional()
-    .describe("目标仓库。省略时默认使用 xinbaijin。")
-}),
+  inputSchema: GET_PATCH_SCHEMA,
 outputSchema: {
   protocol: z.string(),
   repository: z.string(),
@@ -146,6 +154,9 @@ outputSchema: {
     }
   },
     async ({ sha, repository }) => {
+      if (!repository) {
+        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+      }
       try {
        const patch = await getPatch(env, sha, repository);
 
@@ -182,78 +193,13 @@ return {
     "submit_review",
     {
       description:
-        "将代码审查结果写入指定仓库 dev 分支根目录 review.json。" +
-        "此工具只能写 review.json，不能修改源代码。" +
-        "默认仓库为 xinbaijin。",
-      inputSchema: z.object({
-        commit: z
-          .string()
-          .regex(/^[0-9a-fA-F]{40}$/)
-          .describe("本次审查对应的完整 Git commit SHA。"),
-
-        verdict: z.enum([
-          "approved",
-          "changes_requested",
-          "blocked"
-        ]),
-
-        summary: z
-          .string()
-          .trim()
-          .min(1)
-          .max(10000),
-
-        findings: z
-          .array(
-            z.object({
-              severity: z.enum([
-                "critical",
-                "high",
-                "medium",
-                "low",
-                "info"
-              ]),
-
-              file: z
-                .string()
-                .trim()
-                .min(1)
-                .max(500),
-
-              line: z
-                .number()
-                .int()
-                .positive()
-                .nullable()
-                .optional(),
-
-              title: z
-                .string()
-                .trim()
-                .min(1)
-                .max(300),
-
-              description: z
-                .string()
-                .trim()
-                .min(1)
-                .max(5000),
-
-              recommendation: z
-                .string()
-                .trim()
-                .min(1)
-                .max(5000)
-            })
-          )
-          .max(100),
-
-        repository: z.enum(["xinbaijin", "xinbaijin-mcp"])
-          .optional()
-          .describe("目标仓库。省略时默认使用 xinbaijin。")
-      })
+        "将 ChatGPT 的代码审查结果写入目标仓库（必填）dev 分支根目录 review.json。此工具只能写 review.json，不能修改源代码。",
+      inputSchema: SUBMIT_REVIEW_SCHEMA
     },
     async ({ repository, ...input }) => {
+      if (!repository) {
+        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+      }
       try {
         const result = await submitReview(env, input, repository);
 
@@ -289,23 +235,7 @@ return {
         "当审查涉及转义符、引号、Unicode、Base64、JSON 格式、文件末尾换行或编码时，" +
         "必须调用此工具核实原始文件后才能形成 finding。",
 
-      inputSchema: z.object({
-        path: z
-          .string()
-          .trim()
-          .min(1)
-          .max(500)
-          .describe("仓库相对路径，例如 worker.js 或 src/index.js。"),
-
-        ref: z
-          .string()
-          .regex(/^[0-9a-fA-F]{40}$/)
-          .describe("要读取的完整 Git commit SHA。"),
-
-        repository: z.enum(["xinbaijin", "xinbaijin-mcp"])
-          .optional()
-          .describe("目标仓库。省略时默认使用 xinbaijin。")
-      }),
+      inputSchema: GET_FILE_CONTENT_SCHEMA,
 
       outputSchema: {
         protocol: z.literal("xinbaijin-file/1.0"),
@@ -333,6 +263,9 @@ return {
     },
 
     async ({ path, ref, repository }) => {
+      if (!repository) {
+        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+      }
       try {
         const result = await getFileContent(env, path, ref, repository);
 
@@ -376,8 +309,7 @@ return {
 }
 
 async function getLatestHandoff(env, repositoryName) {
-  const { owner, repo, branch, token } =
-    getRepositoryConfig(env, repositoryName);
+  const { owner, repo, branch, token } = getRepositoryConfig(env, repositoryName);
 
   if (!token) {
     throw new Error(
@@ -389,7 +321,12 @@ async function getLatestHandoff(env, repositoryName) {
     `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`;
 
   const response = await fetch(endpoint, {
-    headers: githubHeaders(token)
+    headers: {
+      "accept": "application/vnd.github+json",
+      "authorization": `Bearer ${token}`,
+      "user-agent": "xinbaijin-mcp-worker",
+      "x-github-api-version": "2022-11-28"
+    }
   });
 
   if (!response.ok) {
@@ -432,8 +369,7 @@ async function getLatestHandoff(env, repositoryName) {
 }
 
 async function getPatch(env, requestedSha, repositoryName) {
-  const { owner, repo, branch, token } =
-    getRepositoryConfig(env, repositoryName);
+  const { owner, repo, branch, token } = getRepositoryConfig(env, repositoryName);
 
   if (!token) {
     throw new Error(
@@ -450,7 +386,12 @@ async function getPatch(env, requestedSha, repositoryName) {
     `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`;
 
   const response = await fetch(endpoint, {
-    headers: githubHeaders(token)
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token}`,
+      "user-agent": "xinbaijin-mcp-worker",
+      "x-github-api-version": "2022-11-28"
+    }
   });
 
   if (!response.ok) {
@@ -769,3 +710,5 @@ function jsonResponse(data, status = 200) {
     }
   });
 }
+
+

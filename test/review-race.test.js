@@ -351,11 +351,13 @@ describe(
           await Promise.allSettled([
             submitReview(
               ENV,
-              reviewInput("review A")
+              reviewInput("review A"),
+              "xinbaijin"
             ),
             submitReview(
               ENV,
-              reviewInput("review B")
+              reviewInput("review B"),
+              "xinbaijin"
             )
           ]);
 
@@ -400,7 +402,8 @@ describe(
         await expect(
           submitReview(
             ENV,
-            reviewInput("old review")
+            reviewInput("old review"),
+            "xinbaijin"
           )
         ).rejects.toThrow(
           "Concurrent branch update detected"
