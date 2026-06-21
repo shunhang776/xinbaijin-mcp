@@ -7,6 +7,7 @@ import { REPOSITORIES, DEFAULT_REPOSITORY, submitReview, getRepositoryConfig, gi
 
 import { REPOSITORY_PARAM, GET_LATEST_HANDOFF_SCHEMA, GET_PATCH_SCHEMA, SUBMIT_REVIEW_SCHEMA, GET_FILE_CONTENT_SCHEMA } from "./mcp-schemas.js";
 export { REPOSITORY_PARAM, GET_LATEST_HANDOFF_SCHEMA, GET_PATCH_SCHEMA, SUBMIT_REVIEW_SCHEMA, GET_FILE_CONTENT_SCHEMA };
+import { logGitHubError } from "./diagnostics.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -85,10 +86,10 @@ export function createServer(env) {
       inputSchema: GET_LATEST_HANDOFF_SCHEMA
     },
     async ({ repository }) => {
-      if (!repository) {
-        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
-      }
       try {
+        if (!repository) {
+          throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+        }
         const handoff = await getLatestHandoff(env, repository);
 
         return {
@@ -100,6 +101,7 @@ export function createServer(env) {
           ]
         };
       } catch (error) {
+        console.error("get_latest_handoff error:", error.message);
         return {
           isError: true,
           content: [
@@ -154,10 +156,10 @@ outputSchema: {
     }
   },
     async ({ sha, repository }) => {
-      if (!repository) {
-        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
-      }
       try {
+        if (!repository) {
+          throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+        }
        const patch = await getPatch(env, sha, repository);
 
 return {
@@ -174,6 +176,7 @@ return {
   ]
 };
       } catch (error) {
+        console.error("get_patch error:", error.message);
         return {
           isError: true,
           content: [
@@ -197,10 +200,10 @@ return {
       inputSchema: SUBMIT_REVIEW_SCHEMA
     },
     async ({ repository, ...input }) => {
-      if (!repository) {
-        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
-      }
       try {
+        if (!repository) {
+          throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+        }
         const result = await submitReview(env, input, repository);
 
         return {
@@ -212,6 +215,7 @@ return {
           ]
         };
       } catch (error) {
+        console.error("submit_review error:", error.message);
         return {
           isError: true,
           content: [
@@ -263,10 +267,10 @@ return {
     },
 
     async ({ path, ref, repository }) => {
-      if (!repository) {
-        throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
-      }
       try {
+        if (!repository) {
+          throw new Error("repository is required. Choose xinbaijin or xinbaijin-mcp.");
+        }
         const result = await getFileContent(env, path, ref, repository);
 
         return {
@@ -290,6 +294,7 @@ return {
           ]
         };
       } catch (error) {
+        console.error("get_file_content error:", error.message);
         return {
           isError: true,
           content: [
@@ -331,6 +336,22 @@ async function getLatestHandoff(env, repositoryName) {
 
   if (!response.ok) {
     const details = await response.text();
+
+    try {
+      const errorBody = JSON.parse(details);
+      logGitHubError({
+        tool: "get_latest_handoff",
+        repository: owner + "/" + repo,
+        owner,
+        repo,
+        ref: branch,
+        status: response.status,
+        githubMessage: errorBody.message || "",
+        requestId: response.headers.get("x-github-request-id") || "",
+        errorName: "GitHubApiError",
+        errorMessage: "GitHub API returned " + response.status
+      });
+    } catch (_) { /* log failure is non-fatal */ }
 
     throw new Error(
       `GitHub API request failed: ${response.status} ${details}`
@@ -396,6 +417,22 @@ async function getPatch(env, requestedSha, repositoryName) {
 
   if (!response.ok) {
     const details = await response.text();
+
+    try {
+      const errorBody = JSON.parse(details);
+      logGitHubError({
+        tool: "get_patch",
+        repository: owner + "/" + repo,
+        owner,
+        repo,
+        ref,
+        status: response.status,
+        githubMessage: errorBody.message || "",
+        requestId: response.headers.get("x-github-request-id") || "",
+        errorName: "GitHubApiError",
+        errorMessage: "GitHub API returned " + response.status
+      });
+    } catch (_) { /* log failure is non-fatal */ }
 
     throw new Error(
       `GitHub API request failed: ${response.status} ${details}`
@@ -548,6 +585,22 @@ async function getFileContent(
 
   if (!response.ok) {
     const details = await response.text();
+
+    try {
+      const errorBody = JSON.parse(details);
+      logGitHubError({
+        tool: "get_file_content",
+        repository: owner + "/" + repo,
+        owner,
+        repo,
+        ref,
+        status: response.status,
+        githubMessage: errorBody.message || "",
+        requestId: response.headers.get("x-github-request-id") || "",
+        errorName: "GitHubApiError",
+        errorMessage: "GitHub API returned " + response.status
+      });
+    } catch (_) { /* log failure is non-fatal */ }
 
     throw new Error(
       `Unable to read repository file: ` +
