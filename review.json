@@ -2,11 +2,11 @@
   "protocol": "xinbaijin-review/1.0",
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
-  "reviewed_commit": "9651788a3310d6a9bdc1047b9b4427ac21c22792",
-  "based_on_branch_head": "9651788a3310d6a9bdc1047b9b4427ac21c22792",
+  "reviewed_commit": "125c8a8a6d39ea0d1c9aaa3a74f2f891bcbeed2c",
+  "based_on_branch_head": "125c8a8a6d39ea0d1c9aaa3a74f2f891bcbeed2c",
   "verdict": "blocked",
-  "summary": "无法可靠完成代码审查：get_patch 对提交 9651788a3310d6a9bdc1047b9b4427ac21c22792 的两次调用均被 OpenAI 安全检查屏蔽，因此未能读取 worker.js 与 test/worker-smoke.test.js 的补丁内容，无法形成有代码证据支持的 findings。",
+  "summary": "占位，不应执行。",
   "findings": [],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-21T14:09:57.400Z"
+  "reviewed_at": "2026-06-21T14:48:41.795Z"
 }
