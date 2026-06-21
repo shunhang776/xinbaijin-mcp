@@ -316,5 +316,76 @@ describe(
         );
       }
     );
+
+    // Boundary: MAX_TOTAL_WALK = 100. 99 review-only + code = success,
+    // 100 review-only + code = success (code found before limit check),
+    // 101 review-only + code = rejected.
+    [99, 100, 101].forEach((reviewCount) => {
+      const shouldSucceed = reviewCount <= 100;
+
+      it(
+        `${reviewCount} review-only commits → ` +
+        (shouldSucceed ? "finds code commit" : "rejected as too deep"),
+        async () => {
+          const codeSha = sha(9000);
+          const reviewShas = Array.from(
+            { length: reviewCount },
+            (_, i) => sha(i + 1)
+          );
+
+          const commits = new Map();
+          reviewShas.forEach((commitSha, i) => {
+            const parentSha =
+              i === reviewShas.length - 1
+                ? codeSha
+                : reviewShas[i + 1];
+            commits.set(commitSha, reviewCommit(commitSha, parentSha));
+          });
+          commits.set(codeSha, codeCommit(codeSha));
+
+          const fetchMock = vi.fn(async (input, init = {}) => {
+            const url = getUrl(input);
+            const { pathname } = url;
+            const method = String(init.method || "GET").toUpperCase();
+
+            if (
+              method === "GET" &&
+              pathname.endsWith("/contents/review.json")
+            ) {
+              return json({ message: "Not Found" }, 404);
+            }
+
+            if (
+              method === "GET" &&
+              pathname.includes("/commits/")
+            ) {
+              const commitSha = decodeURIComponent(
+                pathname.split("/commits/")[1]
+              );
+              const commit = commits.get(commitSha);
+              return commit ? json(commit) : json({ message: "Not Found" }, 404);
+            }
+
+            return json(
+              { message: `Unhandled ${method} ${pathname}` },
+              500
+            );
+          });
+
+          vi.stubGlobal("fetch", fetchMock);
+
+          if (shouldSucceed) {
+            const result = await getLatestReviewableCommit(
+              ENV, reviewShas[0], "xinbaijin-mcp"
+            );
+            expect(result.sha).toBe(codeSha);
+          } else {
+            await expect(
+              getLatestReviewableCommit(ENV, reviewShas[0], "xinbaijin-mcp")
+            ).rejects.toThrow(/Commit history too deep/);
+          }
+        }
+      );
+    });
   }
 );
