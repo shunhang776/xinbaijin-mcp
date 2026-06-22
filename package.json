@@ -1,0 +1,25 @@
+{
+  "name": "xinbaijin-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "predeploy": "npm run check:branch-protection",
+    "check:branch-protection": "node scripts/check-branch-protection.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.8.1",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "agents": "0.14.4",
+    "hono": "^4.12.26",
+    "just-pick": "^4.2.0",
+    "octokit": "^5.0.5",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9",
+    "wrangler": "4.103.0"
+  }
+}
