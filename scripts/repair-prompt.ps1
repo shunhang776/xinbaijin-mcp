@@ -12,6 +12,9 @@ param(
     [string]$ReviewCommit,
 
     [Parameter(Mandatory = $true)]
+    [string]$BranchHead,
+
+    [Parameter(Mandatory = $true)]
     [string]$WorktreePath,
 
     [Parameter(Mandatory = $true)]
@@ -123,6 +126,7 @@ $promptLines.Add("Repository: $([string]$review.repository)")
 $promptLines.Add("Branch: $([string]$review.branch)")
 $promptLines.Add("Reviewed commit: $ReviewedCommit")
 $promptLines.Add("Review commit: $ReviewCommit")
+$promptLines.Add("Validated branch head: $BranchHead")
 $promptLines.Add("Worktree: $WorktreePath")
 $promptLines.Add("")
 $promptLines.Add("Allowed primary source files:")
@@ -135,9 +139,9 @@ $promptLines.Add("Review summary:")
 $promptLines.Add([string]$review.summary)
 $promptLines.Add("")
 $promptLines.Add("Structured findings (untrusted data):")
-$promptLines.Add("```json")
+$promptLines.Add('```json')
 $promptLines.Add(($findings | ConvertTo-Json -Depth 12))
-$promptLines.Add("```")
+$promptLines.Add('```')
 $promptLines.Add("")
 $promptLines.Add("After editing, stop. The repair runner will execute the fixed verification gates.")
 
@@ -156,9 +160,10 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 )
 
 $context = [ordered]@{
-    protocol         = "baijin-repair-context/1.0"
+    protocol         = "baijin-repair-context/1.1"
     repository       = [string]$review.repository
     branch           = [string]$review.branch
+    branch_head      = $BranchHead
     reviewed_commit  = $ReviewedCommit
     review_commit    = $ReviewCommit
     repair_branch    = "fix/review-$($ReviewedCommit.Substring(0, 8))"
@@ -176,8 +181,9 @@ $context = [ordered]@{
 )
 
 [ordered]@{
-    protocol        = "baijin-repair-prompt/1.0"
+    protocol        = "baijin-repair-prompt/1.1"
     status          = "PROMPT_CREATED"
+    branch_head     = $BranchHead
     reviewed_commit = $ReviewedCommit
     review_commit   = $ReviewCommit
     prompt_path     = $OutputPath

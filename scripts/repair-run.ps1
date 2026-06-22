@@ -369,6 +369,8 @@ if ($Mode -eq "Prepare") {
             $ReviewedCommit,
             "-ReviewCommit",
             $reviewCommit,
+            "-BranchHead",
+            ([string]$validation.branch_head),
             "-WorktreePath",
             $worktreePath,
             "-OutputPath",
