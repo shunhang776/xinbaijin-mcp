@@ -7,6 +7,8 @@ param(
 
     [string]$Branch = "dev",
 
+    [switch]$NoFetch,
+
     [string]$ReviewedCommit = "",
 
     [string[]]$AllowPath = @(),
@@ -119,17 +121,25 @@ function Invoke-Validator {
         throw "Validator not found: $validatorPath"
     }
 
+    $validatorArguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        $validatorPath,
+        "-RepoRoot",
+        $RepoRoot,
+        "-Branch",
+        $Branch
+    )
+
+    if ($NoFetch) {
+        $validatorArguments += "-NoFetch"
+    }
+
     $result = Invoke-ProcessCapture `
         -FilePath "powershell.exe" `
-        -Arguments @(
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            $validatorPath,
-            "-RepoRoot",
-            $RepoRoot
-        ) `
+        -Arguments $validatorArguments `
         -WorkingDirectory $RepoRoot
 
     if ($result.ExitCode -ne 0) {
@@ -240,6 +250,7 @@ function Test-AllowedPath {
         [string[]]$AllowedFiles,
 
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [string[]]$ExtraPatterns
     )
 
@@ -365,6 +376,7 @@ if ($Mode -eq "Prepare") {
             $promptScriptPath,
             "-RepoRoot",
             $RepoRoot,
+            "-RemoteRef",             ("origin/{0}" -f $Branch),
             "-ReviewedCommit",
             $ReviewedCommit,
             "-ReviewCommit",
@@ -507,7 +519,7 @@ if ($unexpectedPaths.Count -gt 0) {
         status           = "BLOCKED_UNEXPECTED_PATH"
         reviewed_commit  = $reviewedCommitFromContext
         changed_paths    = $changedPaths
-        unexpected_paths = @($unexpectedPaths)
+        unexpected_paths = $unexpectedPaths.ToArray()
         allowed_files    = $allowedFiles
     }
 
@@ -564,7 +576,7 @@ foreach ($definition in $gateDefinitions) {
             worktree_path   = $worktreePath
             changed_paths   = $changedPaths
             failed_gate     = $definition.name
-            gates           = @($gates)
+            gates           = $gates.ToArray()
             push_performed  = $false
             pr_created      = $false
         }
@@ -581,7 +593,7 @@ Write-Result -Data @{
     worktree_path   = $worktreePath
     prompt_path     = [string]$context.prompt_path
     changed_paths   = $changedPaths
-    gates           = @($gates)
+    gates           = $gates.ToArray()
     push_performed  = $false
     pr_created      = $false
     next_step       = "Inspect the diff manually. Phase 2 does not commit, push, or create a PR."
