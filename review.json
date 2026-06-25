@@ -2,20 +2,11 @@
   "protocol": "xinbaijin-review/1.0",
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
-  "reviewed_commit": "8977499e3feff6fa5bc5914588f2d662ea38ddb4",
-  "based_on_branch_head": "8977499e3feff6fa5bc5914588f2d662ea38ddb4",
-  "verdict": "blocked",
-  "summary": "Phase 4-D negative dry-run validation: intentionally blocked to verify denied behavior.",
-  "findings": [
-    {
-      "severity": "high",
-      "file": "docs/PHASE4D-NEGATIVE-BLOCKED-20260626-024200.md",
-      "line": 1,
-      "title": "Intentional blocked negative dry-run finding",
-      "description": "This finding is intentionally created to verify that blocked is classified as denied by real-review-shadow and production-gate dry-run.",
-      "recommendation": "No production action. This is a controlled Phase 4-D negative validation case."
-    }
-  ],
+  "reviewed_commit": "d4dbc1437655a56221b9c54029e36ff66da39a4f",
+  "based_on_branch_head": "a93bac67ec0358381ef4ef067aae93ce5b6b64ba",
+  "verdict": "approved",
+  "summary": "Phase 4-D negative dry-run validation: intentionally stale reviewed_commit to verify denied behavior.",
+  "findings": [],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-25T18:42:03.000Z"
+  "reviewed_at": "2026-06-25T18:48:58.000Z"
 }
