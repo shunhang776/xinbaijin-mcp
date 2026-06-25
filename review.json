@@ -2,11 +2,20 @@
   "protocol": "xinbaijin-review/1.0",
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
-  "reviewed_commit": "0adaac4d2b5596a9a9fc30f9e7a95aba9fa0e2fe",
-  "based_on_branch_head": "0adaac4d2b5596a9a9fc30f9e7a95aba9fa0e2fe",
-  "verdict": "approved",
-  "summary": "已审查提交 0adaac4d2b5596a9a9fc30f9e7a95aba9fa0e2fe。worker.js 将 get_patch 的 outputSchema 与实际返回协议统一为 xinbaijin-patch/2.0，测试覆盖了 schema 对 2.0 的接受、对 1.0 的拒绝、运行时 structuredContent.protocol 以及 base_commit。未发现正确性、边界条件、异常处理、安全性、兼容性或回归方面的阻塞问题；本次变更未触及跨仓库写入、stale review、fast-forward 或分支头并发保护逻辑。",
-  "findings": [],
+  "reviewed_commit": "bceeb3713c8ce2a6f9d2f10dcb04fefed185d10b",
+  "based_on_branch_head": "bceeb3713c8ce2a6f9d2f10dcb04fefed185d10b",
+  "verdict": "changes_requested",
+  "summary": "Phase 3-A smoke review: intentionally denied to verify real review.json shadow gate.",
+  "findings": [
+    {
+      "severity": "info",
+      "file": "review.json",
+      "line": 1,
+      "title": "Phase 3-A smoke test",
+      "description": "This is a controlled smoke review to verify that baijin-real-review-shadow can read a real review.json commit, build gate-input, and receive the expected denied policy result.",
+      "recommendation": "No production action. This smoke review can be overwritten by the next real ChatGPT review."
+    }
+  ],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-21T15:31:23.969Z"
+  "reviewed_at": "2026-06-25T13:37:36.000Z"
 }
