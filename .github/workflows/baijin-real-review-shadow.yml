@@ -28,7 +28,7 @@ jobs:
       - name: Checkout xinbaijin-mcp
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Generate Baijin reader app token
         id: baijin-reader-token
@@ -79,15 +79,19 @@ jobs:
           console.log("Review commit:", reviewCommit);
 
           // 1. Verify single-parent commit
-          const parentCount = parseInt(
-            execSync("git rev-list --count --parents -n1 " + reviewCommit,
-              { encoding: "utf8" }).trim().split(" ").length - 1, 10);
+          const parentLine = execSync("git show -s --format=%P " + reviewCommit, {
+            encoding: "utf8"
+          }).trim();
+
+          const parents = parentLine ? parentLine.split(/\s+/).filter(Boolean) : [];
+          const parentCount = parents.length;
+
           if (parentCount !== 1) {
             console.error("FATAL: must have exactly 1 parent, got " + parentCount);
             process.exit(1);
           }
-          const parentSha = execSync("git rev-parse " + reviewCommit + "^",
-            { encoding: "utf8" }).trim();
+
+          const parentSha = parents[0];
           console.log("Parent commit:", parentSha);
 
           // 2. Verify only review.json was changed
