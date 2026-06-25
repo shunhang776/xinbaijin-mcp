@@ -2,14 +2,14 @@
   "protocol": "xinbaijin-review/1.0",
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
-  "reviewed_commit": "8516be52460bdfdb64f86a7a19186595ac1cedb6",
-  "based_on_branch_head": "8516be52460bdfdb64f86a7a19186595ac1cedb6",
+  "reviewed_commit": "03c439386c8e8e16897e05d17fe8405362a62dfb",
+  "based_on_branch_head": "03c439386c8e8e16897e05d17fe8405362a62dfb",
   "verdict": "changes_requested",
   "summary": "Phase 4-D negative dry-run validation: intentionally changes_requested to verify denied behavior.",
   "findings": [
     {
       "severity": "medium",
-      "file": "docs/PHASE4D-NEGATIVE-CHANGES-REQUESTED-20260626-014539.md",
+      "file": "docs/PHASE4D-NEGATIVE-CHANGES-REQUESTED-20260626-022653.md",
       "line": 1,
       "title": "Intentional negative dry-run finding",
       "description": "This finding is intentionally created to verify that changes_requested is classified as denied by real-review-shadow and production-gate dry-run.",
@@ -17,5 +17,5 @@
     }
   ],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-25T17:45:42.000Z"
+  "reviewed_at": "2026-06-25T18:27:15.000Z"
 }
