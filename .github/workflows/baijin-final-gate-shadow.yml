@@ -103,7 +103,13 @@ jobs:
             console.log("Using empty check runs");
           }
 
-          const normalizedChecks = normalizeCheckRuns(rawChecks);
+          // Map GitHub check-runs head_sha -> commit_sha for governance normalizer
+          const checksForGovernance = rawChecks.map((check) => ({
+            ...check,
+            commit_sha: check.commit_sha ?? check.head_sha
+          }));
+
+          const normalizedChecks = normalizeCheckRuns(checksForGovernance);
           const matchingChecks = normalizedChecks.filter(
             (c) => c.commit_sha === candidateCommit
           );
