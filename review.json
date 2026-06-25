@@ -2,11 +2,11 @@
   "protocol": "xinbaijin-review/1.0",
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
-  "reviewed_commit": "12670d623b431effda4b3ca195e04066b8b56ae5",
-  "based_on_branch_head": "fd5e9135285e316140ebc8143c46172d5719a26b",
-  "verdict": "blocked",
-  "summary": "blocked",
+  "reviewed_commit": "0ecfe953b01c6469ec5a955c9188ca93072d63f8",
+  "based_on_branch_head": "0ecfe953b01c6469ec5a955c9188ca93072d63f8",
+  "verdict": "approved",
+  "summary": "已审查提交 0ecfe953b01c6469ec5a955c9188ca93072d63f8。本次变更仅修改 docs/PHASE3B-REAL-REVIEW-SMOKE.md，将 Phase 3-B smoke 文档精简为说明性内容，用于产生非 review.json 的文档提交以测试真实 ChatGPT review -> review.json -> real-review-shadow 流程。变更不涉及 Worker、MCP 工具、业务逻辑、权限、Required Checks、生产门禁、跨仓库写入、stale review 保护、fast-forward 或分支头并发保护。未发现需要阻塞的问题。",
   "findings": [],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-25T14:16:54.652Z"
+  "reviewed_at": "2026-06-25T14:30:42.187Z"
 }
