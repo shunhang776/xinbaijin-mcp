@@ -65,7 +65,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          cat > "$RUNNER_TEMP/build-shadow-gate-input.mjs" << 'SCRIPTEOF'
+          cat > "$GITHUB_WORKSPACE/build-shadow-gate-input.mjs" << 'SCRIPTEOF'
           import { readFileSync, writeFileSync } from "node:fs";
           import { createHash } from "node:crypto";
           import { normalizePullRequestEvent } from "./governance/src/github/actions-event.mjs";
@@ -180,7 +180,7 @@ jobs:
           console.log("Expected policy: denied (stub verdict=changes_requested)");
           SCRIPTEOF
 
-          node "$RUNNER_TEMP/build-shadow-gate-input.mjs"
+          node "$GITHUB_WORKSPACE/build-shadow-gate-input.mjs"
 
       - name: Validate gate-input schema
         working-directory: governance
