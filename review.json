@@ -2,11 +2,11 @@
   "protocol": "xinbaijin-review/1.0",
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
-  "reviewed_commit": "d4dbc1437655a56221b9c54029e36ff66da39a4f",
-  "based_on_branch_head": "a93bac67ec0358381ef4ef067aae93ce5b6b64ba",
+  "reviewed_commit": "fa59eb00f4f595c1bfe9295e71ce751ff8af440c",
+  "based_on_branch_head": "815fff3fc2ec8e3099853b9f629db6cb6ecababd",
   "verdict": "approved",
-  "summary": "Phase 4-D negative dry-run validation: intentionally stale reviewed_commit to verify denied behavior.",
+  "summary": "Phase 4-D negative dry-run validation: intentionally stale based_on_branch_head to verify denied behavior.",
   "findings": [],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-25T18:48:58.000Z"
+  "reviewed_at": "2026-06-25T18:56:13.000Z"
 }
