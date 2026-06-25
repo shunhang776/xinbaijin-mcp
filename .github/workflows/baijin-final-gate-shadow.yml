@@ -18,7 +18,7 @@ permissions:
 
 env:
   CI: "true"
-  GOVERNANCE_SHA: 98d72816fc025818f302f4ca2a914a4a1c9f6ad7
+  GOVERNANCE_SHA: d640c388e7fcdf96b6e750d14994950fc7be50dc
 
 jobs:
   prepare-gate-input:
@@ -28,12 +28,25 @@ jobs:
       - name: Checkout xinbaijin-mcp
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
 
+      - name: Generate Baijin reader app token
+        id: baijin-reader-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ vars.BAIJIN_GOVERNANCE_READER_APP_ID }}
+          private-key: ${{ secrets.BAIJIN_GOVERNANCE_READER_PRIVATE_KEY }}
+          owner: shunhang776
+          repositories: |
+            xinbaijin-governance
+            xinbaijin-mcp
+
       - name: Checkout governance at pinned SHA
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           repository: shunhang776/xinbaijin-governance
           ref: ${{ env.GOVERNANCE_SHA }}
           path: governance
+          token: ${{ steps.baijin-reader-token.outputs.token }}
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
@@ -48,11 +61,11 @@ jobs:
         env:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.baijin-reader-token.outputs.token }}
         run: |
           set -euo pipefail
 
-          cat > "$RUNNER_TEMP/build-shadow-gate-input.mjs" << 'SCRIPTEOF'
+          cat > "$GITHUB_WORKSPACE/build-shadow-gate-input.mjs" << 'SCRIPTEOF'
           import { readFileSync, writeFileSync } from "node:fs";
           import { createHash } from "node:crypto";
           import { normalizePullRequestEvent } from "./governance/src/github/actions-event.mjs";
@@ -90,7 +103,13 @@ jobs:
             console.log("Using empty check runs");
           }
 
-          const normalizedChecks = normalizeCheckRuns(rawChecks);
+          // Map GitHub check-runs head_sha -> commit_sha for governance normalizer
+          const checksForGovernance = rawChecks.map((check) => ({
+            ...check,
+            commit_sha: check.commit_sha ?? check.head_sha
+          }));
+
+          const normalizedChecks = normalizeCheckRuns(checksForGovernance);
           const matchingChecks = normalizedChecks.filter(
             (c) => c.commit_sha === candidateCommit
           );
@@ -167,7 +186,7 @@ jobs:
           console.log("Expected policy: denied (stub verdict=changes_requested)");
           SCRIPTEOF
 
-          node "$RUNNER_TEMP/build-shadow-gate-input.mjs"
+          node "$GITHUB_WORKSPACE/build-shadow-gate-input.mjs"
 
       - name: Validate gate-input schema
         working-directory: governance
@@ -192,11 +211,14 @@ jobs:
   shadow-gate:
     needs:
       - prepare-gate-input
-    uses: shunhang776/xinbaijin-governance/.github/workflows/reusable-final-gate-shadow.yml@98d72816fc025818f302f4ca2a914a4a1c9f6ad7
+    uses: shunhang776/xinbaijin-governance/.github/workflows/reusable-final-gate-shadow.yml@d640c388e7fcdf96b6e750d14994950fc7be50dc
     with:
       gate_input_artifact_name: shadow-gate-input
       expected_policy_result: denied
-      governance_ref: 98d72816fc025818f302f4ca2a914a4a1c9f6ad7
+      governance_ref: d640c388e7fcdf96b6e750d14994950fc7be50dc
+      github_app_id: ${{ vars.BAIJIN_GOVERNANCE_READER_APP_ID }}
+    secrets:
+      github_app_private_key: ${{ secrets.BAIJIN_GOVERNANCE_READER_PRIVATE_KEY }}
     permissions:
       contents: read
       actions: read
