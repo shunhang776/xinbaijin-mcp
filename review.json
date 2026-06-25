@@ -2,20 +2,11 @@
   "protocol": "xinbaijin-review/1.0",
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
-  "reviewed_commit": "ea539e97e2c6f02338df65d6fb307d1ca4a256f9",
-  "based_on_branch_head": "ea539e97e2c6f02338df65d6fb307d1ca4a256f9",
-  "verdict": "changes_requested",
-  "summary": "Phase 3-A smoke review after parent-detection fix: intentionally denied to verify real review.json shadow gate.",
-  "findings": [
-    {
-      "severity": "info",
-      "file": "review.json",
-      "line": 1,
-      "title": "Phase 3-A smoke test after parent detection fix",
-      "description": "This controlled smoke review verifies that baijin-real-review-shadow can read a real review.json commit, detect the parent commit, build gate-input, and receive the expected denied policy result.",
-      "recommendation": "No production action. This smoke review can be overwritten by the next real ChatGPT review."
-    }
-  ],
+  "reviewed_commit": "12670d623b431effda4b3ca195e04066b8b56ae5",
+  "based_on_branch_head": "12670d623b431effda4b3ca195e04066b8b56ae5",
+  "verdict": "blocked",
+  "summary": "工具误调用拦截。",
+  "findings": [],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-25T13:58:21.000Z"
+  "reviewed_at": "2026-06-25T14:16:20.423Z"
 }
