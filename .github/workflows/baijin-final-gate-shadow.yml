@@ -18,7 +18,7 @@ permissions:
 
 env:
   CI: "true"
-  GOVERNANCE_SHA: 98d72816fc025818f302f4ca2a914a4a1c9f6ad7
+  GOVERNANCE_SHA: 3bca8f27c8984d4084b0f23e0c27c59c89639c21
 
 jobs:
   prepare-gate-input:
@@ -28,12 +28,25 @@ jobs:
       - name: Checkout xinbaijin-mcp
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
 
+      - name: Generate Baijin reader app token
+        id: baijin-reader-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.BAIJIN_GOVERNANCE_READER_CLIENT_ID }}
+          private-key: ${{ secrets.BAIJIN_GOVERNANCE_READER_PRIVATE_KEY }}
+          owner: shunhang776
+          repositories: |
+            xinbaijin-governance
+            xinbaijin-mcp
+
       - name: Checkout governance at pinned SHA
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           repository: shunhang776/xinbaijin-governance
           ref: ${{ env.GOVERNANCE_SHA }}
           path: governance
+          token: ${{ steps.baijin-reader-token.outputs.token }}
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
@@ -48,7 +61,7 @@ jobs:
         env:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.baijin-reader-token.outputs.token }}
         run: |
           set -euo pipefail
 
@@ -192,11 +205,14 @@ jobs:
   shadow-gate:
     needs:
       - prepare-gate-input
-    uses: shunhang776/xinbaijin-governance/.github/workflows/reusable-final-gate-shadow.yml@98d72816fc025818f302f4ca2a914a4a1c9f6ad7
+    uses: shunhang776/xinbaijin-governance/.github/workflows/reusable-final-gate-shadow.yml@3bca8f27c8984d4084b0f23e0c27c59c89639c21
     with:
       gate_input_artifact_name: shadow-gate-input
       expected_policy_result: denied
-      governance_ref: 98d72816fc025818f302f4ca2a914a4a1c9f6ad7
+      governance_ref: 3bca8f27c8984d4084b0f23e0c27c59c89639c21
+      github_app_client_id: ${{ vars.BAIJIN_GOVERNANCE_READER_CLIENT_ID }}
+    secrets:
+      github_app_private_key: ${{ secrets.BAIJIN_GOVERNANCE_READER_PRIVATE_KEY }}
     permissions:
       contents: read
       actions: read
