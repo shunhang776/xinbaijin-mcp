@@ -55,7 +55,9 @@ function Invoke-ProcessCapture {
         $command = Get-Command $FilePath -ErrorAction Stop
 
         Push-Location $WorkingDirectory
+        $previousErrorActionPreference = $ErrorActionPreference
         try {
+            $ErrorActionPreference = "Continue"
             & $command.Source @Arguments 1> $stdoutPath 2> $stderrPath
             $exitCode = if ($null -ne $LASTEXITCODE) {
                 [int]$LASTEXITCODE
@@ -65,6 +67,7 @@ function Invoke-ProcessCapture {
             }
         }
         finally {
+            $ErrorActionPreference = $previousErrorActionPreference
             Pop-Location
         }
 
