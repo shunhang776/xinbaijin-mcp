@@ -339,7 +339,17 @@ if ($existingPr.ExitCode -ne 0) {
 }
 
 try {
-    $existingPrItems = @($existingPr.StdOut | ConvertFrom-Json)
+    $existingPrJson = ([string]$existingPr.StdOut).Trim()
+
+    if (
+        [string]::IsNullOrWhiteSpace($existingPrJson) -or
+        $existingPrJson -eq "[]"
+    ) {
+        $existingPrItems = @()
+    }
+    else {
+        $existingPrItems = @($existingPrJson | ConvertFrom-Json)
+    }
 }
 catch {
     $existingPrItems = @()
