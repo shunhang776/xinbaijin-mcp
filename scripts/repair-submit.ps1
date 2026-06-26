@@ -40,15 +40,19 @@ function Invoke-ProcessCapture {
     try {
         $command = Get-Command $FilePath -ErrorAction Stop
 
-        $process = Start-Process `
-            -FilePath $command.Source `
-            -ArgumentList $Arguments `
-            -WorkingDirectory $WorkingDirectory `
-            -NoNewWindow `
-            -Wait `
-            -PassThru `
-            -RedirectStandardOutput $stdoutPath `
-            -RedirectStandardError $stderrPath
+        Push-Location $WorkingDirectory
+        try {
+            & $command.Source @Arguments 1> $stdoutPath 2> $stderrPath
+            $exitCode = if ($null -ne $LASTEXITCODE) {
+                [int]$LASTEXITCODE
+            }
+            else {
+                0
+            }
+        }
+        finally {
+            Pop-Location
+        }
 
         $stdout = [System.IO.File]::ReadAllText($stdoutPath)
         $stderr = [System.IO.File]::ReadAllText($stderrPath)
@@ -56,7 +60,7 @@ function Invoke-ProcessCapture {
         if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
             $logText = @(
                 "COMMAND: $FilePath $($Arguments -join ' ')",
-                "EXIT_CODE: $($process.ExitCode)",
+                "EXIT_CODE: $exitCode",
                 "",
                 "STDOUT:",
                 $stdout,
@@ -73,7 +77,7 @@ function Invoke-ProcessCapture {
         }
 
         return [pscustomobject]@{
-            ExitCode = $process.ExitCode
+            ExitCode = $exitCode
             StdOut   = $stdout
             StdErr   = $stderr
         }
