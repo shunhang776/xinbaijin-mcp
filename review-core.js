@@ -676,5 +676,7 @@ export {
   getRepositoryConfig,
   submitReview,
   getLatestReviewableCommit,
-  githubHeaders
+  githubHeaders,
+  isReviewOnlyCommit
 };
+
