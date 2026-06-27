@@ -547,6 +547,14 @@ async function createBranchRef(
   if (!response.ok) {
     const details = await response.text();
 
+    if (response.status === 403) {
+      throw new Error(
+        `GitHub rejected branch creation (403 Forbidden). ` +
+        `Ensure GITHUB_TOKEN has "Contents: Read and write" scope. ` +
+        `Details: ${details}`
+      );
+    }
+
     throw new Error(
       `Unable to create branch ref ${branchName}: ${response.status} ${details}`
     );
@@ -585,6 +593,14 @@ async function updateBranchRef(
 
   if (!response.ok) {
     const details = await response.text();
+
+    if (response.status === 403) {
+      throw new Error(
+        `GitHub rejected branch update (403 Forbidden). ` +
+        `Ensure GITHUB_TOKEN has "Contents: Read and write" scope. ` +
+        `Details: ${details}`
+      );
+    }
 
     throw new Error(
       `Unable to update branch ref ${branchName}: ${response.status} ${details}`
@@ -627,6 +643,14 @@ async function createPullRequest(
 
   if (!response.ok) {
     const details = await response.text();
+
+    if (response.status === 403) {
+      throw new Error(
+        `GitHub rejected pull request creation (403 Forbidden). ` +
+        `Ensure GITHUB_TOKEN has "Pull requests: Read and write" scope. ` +
+        `Details: ${details}`
+      );
+    }
 
     throw new Error(
       `Unable to create pull request: ${response.status} ${details}`
@@ -713,13 +737,15 @@ async function submitReview(env, input, repositoryName) {
     );
   }
 
-  // 生成 review 写回分支名：review/{repo}/{短sha}-{Git ref 安全时间戳}
+  // 生成 review 写回分支名：review/{repo}/{短sha}-{Git ref 安全时间戳}-{nonce}
+  // nonce 防止同毫秒并发调用产生相同分支名。
   const shortSha = expectedCommit.slice(0, 7);
   const timestamp = new Date()
     .toISOString()
     .replace(/[:.]/g, "-");
+  const nonce = crypto.randomUUID().slice(0, 8);
   const reviewBranchName =
-    `review/${repo}/${shortSha}-${timestamp}`;
+    `review/${repo}/${shortSha}-${timestamp}-${nonce}`;
 
   // 创建 review 写回分支，指向 pin 住的 branchHead。
   await createBranchRef(
@@ -790,6 +816,7 @@ export {
   getRepositoryConfig,
   submitReview,
   getLatestReviewableCommit,
+  getBranchHeadSha,
   githubHeaders,
   isReviewOnlyCommit,
   createBranchRef,

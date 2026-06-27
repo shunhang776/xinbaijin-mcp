@@ -289,9 +289,9 @@ describe(
         const branchRef =
           mock.observedEndpoints.refCreate[0];
 
-        // ref must be "refs/heads/review/{repo}/{shortSha}-{timestamp}"
+        // ref must be "refs/heads/review/{repo}/{shortSha}-{timestamp}-{nonce}"
         expect(branchRef.ref).toMatch(
-          /^refs\/heads\/review\/xinbaijin-mcp\/aaaaaaa-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/
+          /^refs\/heads\/review\/xinbaijin-mcp\/aaaaaaa-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f]{8}$/
         );
 
         // initial sha must be the pinned branchHead
@@ -1040,6 +1040,424 @@ describe(
         expect(
           wrongMcpUrl
         ).toHaveLength(0);
+      }
+    );
+
+    it(
+      "returns helpful error when PR creation gets 403 (missing Pull requests scope)",
+      async () => {
+        const fetchMock = vi.fn(
+          async (input, init = {}) => {
+            const { pathname } = getUrl(input);
+            const method = String(
+              init.method || "GET"
+            ).toUpperCase();
+
+            if (
+              method === "GET" &&
+              pathname.endsWith(
+                "/git/ref/heads/dev"
+              )
+            ) {
+              return json({
+                object: {
+                  sha: BRANCH_HEAD
+                }
+              });
+            }
+
+            if (
+              method === "GET" &&
+              pathname.includes("/commits/")
+            ) {
+              return json({
+                sha: CODE_SHA,
+                commit: {
+                  tree: {
+                    sha: BASE_TREE_SHA
+                  }
+                },
+                files: [
+                  {
+                    filename:
+                      "worker.js",
+                    status: "modified"
+                  }
+                ],
+                parents: []
+              });
+            }
+
+            if (
+              method === "POST" &&
+              pathname.endsWith(
+                "/git/blobs"
+              )
+            ) {
+              return json(
+                { sha: "d".repeat(40) },
+                201
+              );
+            }
+
+            if (
+              method === "POST" &&
+              pathname.endsWith(
+                "/git/trees"
+              )
+            ) {
+              return json(
+                { sha: "e".repeat(40) },
+                201
+              );
+            }
+
+            if (
+              method === "POST" &&
+              pathname.endsWith(
+                "/git/commits"
+              )
+            ) {
+              return json(
+                { sha: REVIEW_SHA },
+                201
+              );
+            }
+
+            if (
+              method === "POST" &&
+              pathname.endsWith(
+                "/git/refs"
+              )
+            ) {
+              return json(
+                {
+                  ref: bodyOf(init)
+                    .ref,
+                  object: {
+                    sha: bodyOf(init)
+                      .sha
+                  }
+                },
+                201
+              );
+            }
+
+            if (
+              method === "PATCH" &&
+              pathname.includes(
+                "/git/refs/heads/review/"
+              )
+            ) {
+              return json(
+                { ref: "ok" },
+                200
+              );
+            }
+
+            // PR creation returns 403
+            if (
+              method === "POST" &&
+              pathname.endsWith(
+                "/pulls"
+              )
+            ) {
+              return json(
+                {
+                  message:
+                    "Resource not accessible by integration"
+                },
+                403
+              );
+            }
+
+            return json(
+              { message: "Unhandled" },
+              500
+            );
+          }
+        );
+
+        vi.stubGlobal(
+          "fetch",
+          fetchMock
+        );
+
+        await expect(
+          submitReview(
+            ENV,
+            reviewInput(
+              "403 test"
+            ),
+            "xinbaijin-mcp"
+          )
+        ).rejects.toThrow(
+          /Pull requests: Read and write/
+        );
+      }
+    );
+
+    it(
+      "creates review.json with all required fields for readback",
+      async () => {
+        let capturedBlobContent = null;
+
+        const fetchMock = vi.fn(
+          async (input, init = {}) => {
+            const { pathname } = getUrl(input);
+            const method = String(
+              init.method || "GET"
+            ).toUpperCase();
+
+            if (
+              method === "GET" &&
+              pathname.endsWith(
+                "/git/ref/heads/dev"
+              )
+            ) {
+              return json({
+                object: {
+                  sha: BRANCH_HEAD
+                }
+              });
+            }
+
+            if (
+              method === "GET" &&
+              pathname.includes("/commits/")
+            ) {
+              return json({
+                sha: CODE_SHA,
+                commit: {
+                  tree: {
+                    sha: BASE_TREE_SHA
+                  }
+                },
+                files: [
+                  {
+                    filename:
+                      "worker.js",
+                    status: "modified"
+                  }
+                ],
+                parents: []
+              });
+            }
+
+            // Capture blob content
+            if (
+              method === "POST" &&
+              pathname.endsWith(
+                "/git/blobs"
+              )
+            ) {
+              capturedBlobContent =
+                bodyOf(init)
+                  .content;
+
+              return json(
+                {
+                  sha: "d".repeat(40)
+                },
+                201
+              );
+            }
+
+            if (
+              method === "POST" &&
+              pathname.endsWith(
+                "/git/trees"
+              )
+            ) {
+              return json(
+                {
+                  sha: "e".repeat(40)
+                },
+                201
+              );
+            }
+
+            if (
+              method === "POST" &&
+              pathname.endsWith(
+                "/git/commits"
+              )
+            ) {
+              return json(
+                { sha: REVIEW_SHA },
+                201
+              );
+            }
+
+            if (
+              method === "POST" &&
+              pathname.endsWith(
+                "/git/refs"
+              )
+            ) {
+              return json(
+                {
+                  ref: bodyOf(init)
+                    .ref,
+                  object: {
+                    sha: bodyOf(init)
+                      .sha
+                  }
+                },
+                201
+              );
+            }
+
+            if (
+              method === "PATCH" &&
+              pathname.includes(
+                "/git/refs/heads/review/"
+              )
+            ) {
+              return json(
+                { ref: "ok" },
+                200
+              );
+            }
+
+            if (
+              method === "POST" &&
+              pathname.endsWith(
+                "/pulls"
+              )
+            ) {
+              return json(
+                {
+                  html_url:
+                    "https://github.com/shunhang776/xinbaijin-mcp/pull/42",
+                  number: 42
+                },
+                201
+              );
+            }
+
+            return json(
+              { message: "Unhandled" },
+              500
+            );
+          }
+        );
+
+        vi.stubGlobal(
+          "fetch",
+          fetchMock
+        );
+
+        const result = await submitReview(
+          ENV,
+          {
+            commit: CODE_SHA,
+            verdict: "changes_requested",
+            summary:
+              "Readback test",
+            findings: [
+              {
+                severity: "info",
+                file: "test.js",
+                line: 1,
+                title: "Test finding",
+                description:
+                  "Finding for readback",
+                recommendation:
+                  "Check readback"
+              }
+            ]
+          },
+          "xinbaijin-mcp"
+        );
+
+        // Verify blob content is valid JSON
+        expect(
+          capturedBlobContent
+        ).not.toBeNull();
+
+        const parsed = JSON.parse(
+          capturedBlobContent
+        );
+
+        // All required fields
+        expect(
+          parsed.protocol
+        ).toBe(
+          "xinbaijin-review/1.0"
+        );
+        expect(
+          parsed.repository
+        ).toBe(
+          "shunhang776/xinbaijin-mcp"
+        );
+        expect(parsed.branch).toBe(
+          "dev"
+        );
+        expect(
+          parsed.reviewed_commit
+        ).toBe(CODE_SHA);
+        expect(
+          parsed.based_on_branch_head
+        ).toBe(BRANCH_HEAD);
+        expect(parsed.verdict).toBe(
+          "changes_requested"
+        );
+        expect(
+          parsed.summary
+        ).toBe("Readback test");
+        expect(
+          parsed.reviewer
+        ).toBe("ChatGPT");
+        expect(
+          typeof parsed.reviewed_at
+        ).toBe("string");
+        expect(
+          parsed.findings
+        ).toHaveLength(1);
+        expect(
+          parsed.findings[0].severity
+        ).toBe("info");
+        expect(
+          parsed.findings[0].file
+        ).toBe("test.js");
+
+        // Trailing newline
+        expect(
+          capturedBlobContent.endsWith(
+            "\n"
+          )
+        ).toBe(true);
+
+        // Returned review_commit matches
+        expect(
+          result.review_commit
+        ).toBe(REVIEW_SHA);
+      }
+    );
+
+    it(
+      "branch name includes a nonce suffix for collision safety",
+      async () => {
+        const mock = prWritebackMock();
+
+        vi.stubGlobal(
+          "fetch",
+          mock.fetchMock
+        );
+
+        const result = await submitReview(
+          ENV,
+          reviewInput("Nonce test"),
+          "xinbaijin-mcp"
+        );
+
+        // Branch name format: review/{repo}/{shortSha}-{timestamp}-{nonce}
+        expect(
+          result.review_branch
+        ).toMatch(
+          /^review\/xinbaijin-mcp\/aaaaaaa-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f]{8}$/
+        );
       }
     );
   }

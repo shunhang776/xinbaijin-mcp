@@ -4,7 +4,7 @@ import { createMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Buffer } from "node:buffer";
-import { REPOSITORIES, DEFAULT_REPOSITORY, submitReview, getRepositoryConfig, githubHeaders } from "./review-core.js";
+import { REPOSITORIES, DEFAULT_REPOSITORY, submitReview, getRepositoryConfig, getLatestReviewableCommit, getBranchHeadSha, githubHeaders } from "./review-core.js";
 
 import { REPOSITORY_PARAM, GET_LATEST_HANDOFF_SCHEMA, GET_PATCH_SCHEMA, SUBMIT_REVIEW_SCHEMA, GET_FILE_CONTENT_SCHEMA } from "./mcp-schemas.js";
 export { REPOSITORY_PARAM, GET_LATEST_HANDOFF_SCHEMA, GET_PATCH_SCHEMA, SUBMIT_REVIEW_SCHEMA, GET_FILE_CONTENT_SCHEMA };
@@ -129,7 +129,7 @@ export function createServer(env) {
         repository: z.string(),
         branch: z.string(),
         requested_ref: z.string(),
-        commit: z.string(),
+        commit: z.string().nullable(),
         base_commit: z.string().nullable(),
         message: z.string().nullable(),
         stats: z.object({
@@ -334,27 +334,13 @@ async function getLatestHandoff(env, repositoryName) {
     );
   }
 
-  const endpoint =
-    `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`;
+  // Skip review-only commits: read the latest code commit, not the branch tip.
+  const branchHead =
+    await getBranchHeadSha(env, repositoryName);
 
-  const response = await fetch(endpoint, {
-    headers: {
-      "accept": "application/vnd.github+json",
-      "authorization": `Bearer ${token}`,
-      "user-agent": "xinbaijin-mcp-worker",
-      "x-github-api-version": "2022-11-28"
-    }
-  });
+  const commit =
+    await getLatestReviewableCommit(env, branchHead, repositoryName);
 
-  if (!response.ok) {
-    const details = await response.text();
-
-    throw new Error(
-      `GitHub API request failed: ${response.status} ${details}`
-    );
-  }
-
-  const commit = await response.json();
   const files = Array.isArray(commit.files) ? commit.files : [];
 
   return {
@@ -413,12 +399,7 @@ async function getPatch(
     encodeURIComponent(ref);
 
   const response = await fetch(endpoint, {
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: `Bearer ${token}`,
-      "user-agent": "xinbaijin-mcp-worker",
-      "x-github-api-version": "2022-11-28"
-    }
+    headers: githubHeaders(token)
   });
 
   if (!response.ok) {
