@@ -5,16 +5,18 @@
  * When submit_review creates a PR that writes review.json, this guard
  * MUST pass before the PR can be squash-merged into dev. It verifies:
  *
- *   1. The PR only modifies review.json (or is a review-only PR).
+ *   1. If the PR touches review.json, the head branch MUST start with
+ *      "review/" and review.json MUST be the ONLY changed file.
+ *      (Fail-closed: any other pattern touching review.json is rejected.)
  *   2. review.json.repository matches the actual repository.
  *   3. review.json.reviewed_commit is still the latest reviewable
  *      code commit on dev (not stale).
  *   4. review.json.based_on_branch_head equals the current dev HEAD
  *      (ensuring the review was written against the exact state it
  *      intends to land on).
- *   5. review.json.verdict is one of the three valid verdicts.
- *   6. review.json.summary and findings are present and structurally
- *      legal.
+ *   5. review.json fields are structurally valid: protocol, branch==PR_BASE,
+ *      verdict, reviewer, reviewed_at, summary, findings array with
+ *      per-finding severity/file/title/description/recommendation/line.
  *
  * Designed to run as a GitHub Actions workflow on pull_request events
  * targeting dev. Can be added as a Required Status Check in branch
@@ -25,7 +27,7 @@
  * malformed review.json, or validation failure results in a non-zero
  * exit code.
  *
- * NON-REVIEW PRs (those that change files beyond review.json) are
+ * NON-REVIEW PRs (those that do NOT touch review.json at all) are
  * skipped with exit code 0 — they're code changes, not review
  * writebacks.
  */
@@ -44,6 +46,7 @@ const PR_HEAD_SHA = process.env.PR_HEAD_SHA;
 const REPO_FULL = process.env.REPO_FULL; // e.g. "shunhang776/xinbaijin-mcp"
 
 const VALID_VERDICTS = ["approved", "changes_requested", "blocked"];
+const VALID_SEVERITIES = ["critical", "high", "medium", "low", "info"];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -93,7 +96,13 @@ function pass(msg) {
 // Validation functions
 // ---------------------------------------------------------------------------
 
-function validateReviewJson(review) {
+/**
+ * Validate the full review.json structure including per-finding checks.
+ * @param {object} review - Parsed review.json
+ * @param {string} prBase - The PR base branch name (e.g. "dev")
+ * @returns {string[]} Array of error messages; empty means valid.
+ */
+function validateReviewJson(review, prBase) {
   const errors = [];
 
   if (!review || typeof review !== "object") {
@@ -101,14 +110,45 @@ function validateReviewJson(review) {
     return errors;
   }
 
+  // Protocol
+  if (review.protocol !== "xinbaijin-review/1.0") {
+    errors.push(
+      `invalid protocol "${review.protocol}" — expected "xinbaijin-review/1.0"`
+    );
+  }
+
   // Repository
   if (typeof review.repository !== "string" || !review.repository.includes("/")) {
     errors.push("missing or invalid repository field");
   }
 
+  // Branch must match PR base
+  if (typeof review.branch !== "string" || review.branch !== prBase) {
+    errors.push(
+      `branch "${review.branch}" does not match PR base "${prBase}"`
+    );
+  }
+
   // Verdict
   if (!VALID_VERDICTS.includes(review.verdict)) {
     errors.push(`invalid verdict "${review.verdict}"`);
+  }
+
+  // Reviewer
+  if (review.reviewer !== "ChatGPT") {
+    errors.push(`invalid reviewer "${review.reviewer}" — expected "ChatGPT"`);
+  }
+
+  // Reviewed at (valid ISO time)
+  if (typeof review.reviewed_at !== "string") {
+    errors.push("missing reviewed_at");
+  } else {
+    const reviewedAt = new Date(review.reviewed_at);
+    if (isNaN(reviewedAt.getTime())) {
+      errors.push(
+        `reviewed_at "${review.reviewed_at}" is not a valid ISO date`
+      );
+    }
   }
 
   // Summary
@@ -119,34 +159,86 @@ function validateReviewJson(review) {
   // Findings
   if (!Array.isArray(review.findings)) {
     errors.push("findings is not an array");
+  } else {
+    for (let i = 0; i < review.findings.length; i++) {
+      const f = review.findings[i];
+      const prefix = `findings[${i}]`;
+
+      if (!f || typeof f !== "object") {
+        errors.push(`${prefix} is not an object`);
+        continue;
+      }
+
+      // severity
+      if (!VALID_SEVERITIES.includes(f.severity)) {
+        errors.push(
+          `${prefix}.severity "${f.severity}" is invalid (expected critical/high/medium/low/info)`
+        );
+      }
+
+      // file — non-empty string
+      if (typeof f.file !== "string" || f.file.trim().length === 0) {
+        errors.push(`${prefix}.file is missing or empty`);
+      }
+
+      // title — non-empty string
+      if (typeof f.title !== "string" || f.title.trim().length === 0) {
+        errors.push(`${prefix}.title is missing or empty`);
+      }
+
+      // description — non-empty string
+      if (typeof f.description !== "string" || f.description.trim().length === 0) {
+        errors.push(`${prefix}.description is missing or empty`);
+      }
+
+      // recommendation — non-empty string
+      if (typeof f.recommendation !== "string" || f.recommendation.trim().length === 0) {
+        errors.push(`${prefix}.recommendation is missing or empty`);
+      }
+
+      // line — positive integer or null/undefined
+      if (f.line !== null && f.line !== undefined) {
+        if (
+          typeof f.line !== "number" ||
+          !Number.isInteger(f.line) ||
+          f.line <= 0
+        ) {
+          errors.push(
+            `${prefix}.line must be a positive integer or null/undefined, got ${f.line}`
+          );
+        }
+      }
+    }
   }
 
   // Reviewed commit
-  if (typeof review.reviewed_commit !== "string" ||
-      !/^[0-9a-f]{40}$/.test(review.reviewed_commit)) {
+  if (
+    typeof review.reviewed_commit !== "string" ||
+    !/^[0-9a-f]{40}$/.test(review.reviewed_commit)
+  ) {
     errors.push("missing or invalid reviewed_commit SHA");
   }
 
   // Based on branch head
-  if (typeof review.based_on_branch_head !== "string" ||
-      !/^[0-9a-f]{40}$/.test(review.based_on_branch_head)) {
+  if (
+    typeof review.based_on_branch_head !== "string" ||
+    !/^[0-9a-f]{40}$/.test(review.based_on_branch_head)
+  ) {
     errors.push("missing or invalid based_on_branch_head SHA");
-  }
-
-  // Branch
-  if (typeof review.branch !== "string" || review.branch.length === 0) {
-    errors.push("missing or empty branch field");
   }
 
   return errors;
 }
+
+// ---------------------------------------------------------------------------
+// Semantic validation (API-dependent)
+// ---------------------------------------------------------------------------
 
 /**
  * Get the latest non-review-only commit SHA on a branch.
  * Walk parents until we find a commit whose files are not all review.json.
  */
 async function getLatestReviewableCommitSha(token, owner, repo, branchName) {
-  // First get the branch HEAD
   const { status: refStatus, body: refBody } = await apiRequest(
     token,
     `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branchName)}`
@@ -178,7 +270,9 @@ async function getLatestReviewableCommitSha(token, owner, repo, branchName) {
     );
 
     if (commitStatus !== 200) {
-      throw new Error(`Failed to read commit ${currentSha}: HTTP ${commitStatus}`);
+      throw new Error(
+        `Failed to read commit ${currentSha}: HTTP ${commitStatus}`
+      );
     }
 
     let commit;
@@ -189,24 +283,25 @@ async function getLatestReviewableCommitSha(token, owner, repo, branchName) {
     }
 
     const files = Array.isArray(commit.files) ? commit.files : [];
-    const isReviewOnly = files.length > 0 &&
+    const isReviewOnly =
+      files.length > 0 &&
       files.every((f) => f.filename === "review.json");
 
     if (!isReviewOnly) {
       return currentSha;
     }
 
-    // Follow first parent
     const parents = Array.isArray(commit.parents) ? commit.parents : [];
     if (parents.length === 0) {
-      // Root commit with only review.json — unusual but possible
       return currentSha;
     }
 
     currentSha = parents[0].sha;
   }
 
-  throw new Error(`Exceeded MAX_WALK (${MAX_WALK}) without finding a code commit`);
+  throw new Error(
+    `Exceeded MAX_WALK (${MAX_WALK}) without finding a code commit`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -230,31 +325,11 @@ async function main() {
 
   const [owner, repo] = REPO_FULL.split("/");
 
-  // --- Step 1: Get PR files ---
-  console.log(`PR #${PR_NUMBER} → base=${PR_BASE} head=${PR_HEAD_SHA.slice(0, 7)}`);
-
-  const { status: prStatus, body: prBody } = await apiRequest(
-    TOKEN,
-    `/repos/${REPO_FULL}/pulls/${PR_NUMBER}`
+  console.log(
+    `PR #${PR_NUMBER} → base=${PR_BASE} head=${PR_HEAD_SHA.slice(0, 7)}`
   );
 
-  if (prStatus !== 200) {
-    fail(`Failed to read PR #${PR_NUMBER}: HTTP ${prStatus}`);
-    return;
-  }
-
-  let prData;
-  try {
-    prData = JSON.parse(prBody);
-  } catch {
-    fail(`Failed to parse PR #${PR_NUMBER} response`);
-    return;
-  }
-
-  // --- Step 2: Determine if this is a review writeback PR ---
-  // A review writeback PR is one that ONLY changes review.json.
-  // We also check if the branch name starts with "review/" as a hint.
-  const headBranch = prData.head?.ref || "";
+  // --- Step 1: Get PR files ---
   const rawFiles = await apiRequest(
     TOKEN,
     `/repos/${REPO_FULL}/pulls/${PR_NUMBER}/files`
@@ -271,21 +346,61 @@ async function main() {
   const changedFiles = Array.isArray(files)
     ? files.map((f) => f.filename)
     : [];
-
   console.log(`Changed files: ${changedFiles.join(", ") || "(none)"}`);
 
-  // Only gate review.json-only PRs. Code PRs pass through.
-  if (!(changedFiles.length === 1 && changedFiles[0] === "review.json")) {
-    pass("not a review-only PR — guard does not apply");
+  const hasReviewJson = changedFiles.includes("review.json");
+  const onlyReviewJson =
+    changedFiles.length === 1 && changedFiles[0] === "review.json";
+
+  // --- Step 2: Fail-closed — any review.json touch must be a valid review PR ---
+  if (hasReviewJson) {
+    // PR metadata for branch check
+    const { status: prStatus, body: prBodyStr } = await apiRequest(
+      TOKEN,
+      `/repos/${REPO_FULL}/pulls/${PR_NUMBER}`
+    );
+
+    if (prStatus !== 200) {
+      fail(`Failed to read PR #${PR_NUMBER}: HTTP ${prStatus}`);
+      return;
+    }
+
+    let prData;
+    try {
+      prData = JSON.parse(prBodyStr);
+    } catch {
+      fail(`Failed to parse PR #${PR_NUMBER} response`);
+      return;
+    }
+
+    const headBranch = prData.head?.ref || "";
+
+    // 2a: head branch MUST start with review/
+    if (!headBranch.startsWith("review/")) {
+      fail(
+        `review.json modified on non-review branch "${headBranch}". ` +
+        `review.json may only be written by submit_review via a review/* branch.`
+      );
+      return;
+    }
+
+    // 2b: review.json MUST be the ONLY changed file
+    if (!onlyReviewJson) {
+      fail(
+        `review.json modified alongside other files: ${changedFiles.join(", ")}. ` +
+        `review writeback PRs must only change review.json.`
+      );
+      return;
+    }
+
+    console.log(
+      `Detected review writeback PR (branch: ${headBranch})`
+    );
+  } else {
+    // No review.json in this PR — genuine code change, skip guard.
+    pass("PR does not modify review.json — guard does not apply");
     return;
   }
-
-  if (!headBranch.startsWith("review/")) {
-    pass("review.json change but branch is not review/* — guard does not apply");
-    return;
-  }
-
-  console.log(`Detected review writeback PR (branch: ${headBranch})`);
 
   // --- Step 3: Read review.json from PR head ---
   const { status: fileStatus, body: fileBody } = await apiRequest(
@@ -322,7 +437,7 @@ async function main() {
   }
 
   // --- Step 4: Validate review.json structure ---
-  const errors = validateReviewJson(review);
+  const errors = validateReviewJson(review, PR_BASE);
   if (errors.length > 0) {
     for (const err of errors) {
       fail(`review.json field validation: ${err}`);
@@ -342,25 +457,27 @@ async function main() {
   pass(`repository matches: ${expectedRepo}`);
 
   // --- Step 6: Verify based_on_branch_head === current dev HEAD ---
-  const { status: refStatus2, body: refBody2 } = await apiRequest(
+  const { status: refStatus, body: refBody } = await apiRequest(
     TOKEN,
     `/repos/${REPO_FULL}/git/ref/heads/${encodeURIComponent(PR_BASE)}`
   );
 
-  if (refStatus2 !== 200) {
-    fail(`Failed to read ${PR_BASE} branch head: HTTP ${refStatus2}`);
+  if (refStatus !== 200) {
+    fail(`Failed to read ${PR_BASE} branch head: HTTP ${refStatus}`);
     return;
   }
 
   let currentDevHead;
   try {
-    currentDevHead = JSON.parse(refBody2).object.sha;
+    currentDevHead = JSON.parse(refBody).object.sha;
   } catch {
     fail("Failed to parse dev branch head response");
     return;
   }
 
-  if (review.based_on_branch_head.toLowerCase() !== currentDevHead.toLowerCase()) {
+  if (
+    review.based_on_branch_head.toLowerCase() !== currentDevHead.toLowerCase()
+  ) {
     fail(
       `based_on_branch_head mismatch: ` +
       `review.json says ${review.based_on_branch_head.slice(0, 7)} ` +
@@ -375,14 +492,19 @@ async function main() {
   let latestCodeCommit;
   try {
     latestCodeCommit = await getLatestReviewableCommitSha(
-      TOKEN, owner, repo, PR_BASE
+      TOKEN,
+      owner,
+      repo,
+      PR_BASE
     );
   } catch (e) {
     fail(`Failed to find latest reviewable code commit: ${e.message}`);
     return;
   }
 
-  if (review.reviewed_commit.toLowerCase() !== latestCodeCommit.toLowerCase()) {
+  if (
+    review.reviewed_commit.toLowerCase() !== latestCodeCommit.toLowerCase()
+  ) {
     fail(
       `reviewed_commit mismatch: ` +
       `review.json says ${review.reviewed_commit.slice(0, 7)} ` +
@@ -393,7 +515,7 @@ async function main() {
   }
   pass(`reviewed_commit is latest reviewable code commit on ${PR_BASE}`);
 
-  // --- Step 8: All checks passed ---
+  // --- All checks passed ---
   console.log("\n=== Review Writeback Guard: PASSED ===");
 }
 
