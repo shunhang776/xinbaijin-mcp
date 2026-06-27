@@ -2,20 +2,28 @@
   "protocol": "xinbaijin-review/1.0",
   "repository": "shunhang776/xinbaijin-mcp",
   "branch": "dev",
-  "reviewed_commit": "174c3cfccc075c0e85c0d524c8de7c61c9151696",
-  "based_on_branch_head": "174c3cfccc075c0e85c0d524c8de7c61c9151696",
+  "reviewed_commit": "7d7aafe52008a7b8390e96144a903292c4293d46",
+  "based_on_branch_head": "7d7aafe52008a7b8390e96144a903292c4293d46",
   "verdict": "changes_requested",
-  "summary": "审查发现此次提交修复了 PR writeback 的 GitHub Token 权限提示、review 分支 nonce、防止直接 PATCH dev、get_latest_handoff 跳过 review-only commit 等问题；但 PR-based review 写回仍缺少合并前 stale/base-head 强制校验。当前实现只在创建 review PR 前重读 dev head，不能阻止 review PR 创建后被合并到已经前进的 dev 上，因此需要补齐 required check 或等价 gate 校验后再通过。",
+  "summary": "审查发现此次提交完成了 review-writeback-guard 的主体闭环：新增 workflow、guard 脚本和测试，能够校验 review.json 的 repository、based_on_branch_head、reviewed_commit 与当前 dev/latest code commit 的一致性，并已接入 required check 方向。但 guard 目前对非 review/* 分支上的 review.json 修改选择跳过，且 review.json 结构校验仍未覆盖 findings 元素结构、protocol、reviewer、reviewed_at 和 branch 与 PR base 的一致性；这会削弱 review.json 作为审查结果唯一可信来源的约束。需要补齐后再批准。",
   "findings": [
     {
       "severity": "high",
-      "file": "review-core.js",
-      "line": 740,
-      "title": "PR 写回缺少合并前 based_on_branch_head 强制校验",
-      "description": "submitReview 在创建 review PR 前会重读 dev branch head，并将 based_on_branch_head 写入 review.json 与 PR body；但 PR 创建之后到实际 merge 之前仍存在窗口。如果 dev 在此期间合入新的代码提交，而仓库规则没有强制校验 review.json.based_on_branch_head 等于当前 dev HEAD、reviewed_commit 仍为 latest reviewable code commit，该 review.json PR 仍可能被合并到更新后的 dev 上，导致旧审查结果落到新分支状态。当前提交没有新增可执行 required check、workflow、gate 脚本或同等强制机制来阻止该 stale review PR 合并。",
-      "recommendation": "新增并启用合并前强制校验：在 review PR 的 required check 中读取 PR head 的 review.json，校验 repository、reviewed_commit、based_on_branch_head、verdict 等字段，并确认 based_on_branch_head 等于当前 base dev HEAD、reviewed_commit 仍等于 latest reviewable code commit；不一致时该 check 必须失败并被 dev 分支保护列为 required check。不能只依赖 PR body 或人工阅读。"
+      "file": "scripts/review-writeback-guard.js",
+      "line": null,
+      "title": "非 review/* 分支修改 review.json 会被跳过而不是失败",
+      "description": "当前 guard 只有在 PR 恰好只修改 review.json 且 head 分支以 review/ 开头时才执行校验；如果 PR 修改了 review.json 但分支不是 review/*，或 review.json 与其他文件一起修改，脚本会输出 pass 并退出 0。这会允许非 submit_review 路径通过普通 PR 修改 review.json，破坏“review.json 只能由审查写回流程生成”的边界，也可能让 stale 或伪造的审查结果随代码 PR 合入。",
+      "recommendation": "改为 fail-closed：只要 changed_files 中包含 review.json，就必须满足 head 分支为 review/* 且 PR 只修改 review.json，并继续执行完整 review writeback 校验；否则直接失败。真正的普通代码 PR 如果不修改 review.json 才应跳过。补充测试覆盖：非 review/* 分支单独改 review.json 失败、代码 PR 同时改 review.json 和源码失败、普通代码 PR 不含 review.json 时跳过。"
+    },
+    {
+      "severity": "medium",
+      "file": "scripts/review-writeback-guard.js",
+      "line": null,
+      "title": "review.json 结构校验未覆盖 findings 元素和关键元数据字段",
+      "description": "validateReviewJson 目前只验证 repository、verdict、summary、findings 是否为数组、reviewed_commit、based_on_branch_head 和 branch 非空；但没有验证 protocol 是否为 xinbaijin-review/1.0、branch 是否等于 PR base、reviewer/reviewed_at 是否存在且合法，也没有校验 findings 数组内每个 finding 的 severity、file、title、description、recommendation、line 等字段结构。这样 malformed review.json 仍可能通过 guard，后续 Gate、Claude repair 或审计消费时会遇到不完整审查结果。",
+      "recommendation": "扩展 validateReviewJson：强制 protocol 为 xinbaijin-review/1.0，branch 等于 PR_BASE，reviewer 为 ChatGPT 或受控值，reviewed_at 为有效 ISO 时间；对 findings 中每个元素校验 severity 枚举、file/title/description/recommendation 非空字符串、line 为正整数或 null。为每个缺字段/非法字段补测试。"
     }
   ],
   "reviewer": "ChatGPT",
-  "reviewed_at": "2026-06-27T14:09:43.063Z"
+  "reviewed_at": "2026-06-27T14:32:37.248Z"
 }
