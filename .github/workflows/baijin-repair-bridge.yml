@@ -21,11 +21,7 @@ jobs:
 
       - name: Run repair bridge
         shell: pwsh
-        run: |
-          ./scripts/repair-bridge.ps1 `
-            -RepoRoot ${{ github.workspace }} `
-            -ExpectedRepository ${{ github.repository }} `
-            -Branch dev
+        run: ./scripts/repair-bridge.ps1 -RepoRoot ${{ github.workspace }} -ExpectedRepository ${{ github.repository }} -Branch dev
 
       - name: Upload repair artifacts
         if: always()
