@@ -101,6 +101,7 @@ function concurrentMock() {
 
   const parents = new Map();
   const waitForTwoHeads = barrier(2);
+  let headReadCount = 0;
 
   const fetchMock = vi.fn(
     async (input, init = {}) => {
@@ -116,6 +117,7 @@ function concurrentMock() {
         const observed = head;
 
         await waitForTwoHeads();
+        headReadCount++;
 
         return json({
           object: {
@@ -178,30 +180,54 @@ function concurrentMock() {
         return json({ sha });
       }
 
+      // POST create branch ref
+      if (
+        method === "POST" &&
+        pathname.endsWith("/git/refs")
+      ) {
+        const body = bodyOf(init);
+
+        return json(
+          {
+            ref: body.ref,
+            object: {
+              sha: body.sha
+            }
+          },
+          201
+        );
+      }
+
+      // PATCH update review branch
       if (
         method === "PATCH" &&
-        pathname.endsWith("/git/refs/heads/dev")
+        pathname.includes(
+          "/git/refs/heads/review/"
+        )
       ) {
-        const candidate = bodyOf(init).sha;
-
-        if (parents.get(candidate) !== head) {
-          return json(
-            {
-              message:
-                "Update is not a fast forward"
-            },
-            422
-          );
-        }
-
-        head = candidate;
-
         return json({
-          ref: "refs/heads/dev",
+          ref: pathname
+            .split("/git/")[1]
+            .replace("refs/", "refs/"),
           object: {
-            sha: candidate
+            sha: bodyOf(init).sha
           }
         });
+      }
+
+      // POST create PR
+      if (
+        method === "POST" &&
+        pathname.endsWith("/pulls")
+      ) {
+        return json(
+          {
+            html_url:
+              "https://github.com/shunhang776/xinbaijin/pull/99",
+            number: 99
+          },
+          201
+        );
       }
 
       return json(
@@ -216,7 +242,8 @@ function concurrentMock() {
 
   return {
     fetchMock,
-    getHead: () => head
+    getHead: () => head,
+    getHeadReadCount: () => headReadCount
   };
 }
 
@@ -224,7 +251,6 @@ function pushDuringReviewMock() {
   let head = CODE_SHA;
 
   const reviewSha = "3".repeat(40);
-  const parents = new Map();
 
   const fetchMock = vi.fn(
     async (input, init = {}) => {
@@ -277,11 +303,7 @@ function pushDuringReviewMock() {
         method === "POST" &&
         pathname.endsWith("/git/commits")
       ) {
-        parents.set(
-          reviewSha,
-          bodyOf(init).parents[0]
-        );
-
+        // External push happens while review is in progress.
         head = NEW_CODE_SHA;
 
         return json({
@@ -289,29 +311,50 @@ function pushDuringReviewMock() {
         });
       }
 
+      // POST create branch ref
+      if (
+        method === "POST" &&
+        pathname.endsWith("/git/refs")
+      ) {
+        return json(
+          {
+            ref: bodyOf(init).ref,
+            object: {
+              sha: bodyOf(init).sha
+            }
+          },
+          201
+        );
+      }
+
+      // PATCH update review branch
       if (
         method === "PATCH" &&
-        pathname.endsWith("/git/refs/heads/dev")
+        pathname.includes(
+          "/git/refs/heads/review/"
+        )
       ) {
-        const candidate = bodyOf(init).sha;
-
-        if (parents.get(candidate) !== head) {
-          return json(
-            {
-              message:
-                "Update is not a fast forward"
-            },
-            422
-          );
-        }
-
-        head = candidate;
-
         return json({
+          ref: "ok",
           object: {
-            sha: candidate
+            sha: bodyOf(init).sha
           }
         });
+      }
+
+      // POST create PR
+      if (
+        method === "POST" &&
+        pathname.endsWith("/pulls")
+      ) {
+        return json(
+          {
+            html_url:
+              "https://github.com/shunhang776/xinbaijin/pull/1",
+            number: 1
+          },
+          201
+        );
       }
 
       return json(
@@ -338,7 +381,7 @@ describe(
   "submitReview race protection",
   () => {
     it(
-      "allows only one of two reviews based on the same branch head",
+      "allows both concurrent reviews (PR mode does not race on dev ref)",
       async () => {
         const mock = concurrentMock();
 
@@ -371,19 +414,21 @@ describe(
             result.status === "rejected"
         );
 
-        expect(fulfilled).toHaveLength(1);
-        expect(rejected).toHaveLength(1);
+        // Both succeed — separate review branches,
+        // no shared dev ref mutation.
+        expect(fulfilled).toHaveLength(2);
+        expect(rejected).toHaveLength(0);
 
         expect(
-          rejected[0].reason.message
-        ).toContain(
-          "Concurrent branch update detected"
-        );
-
+          fulfilled[0].value.writeback_mode
+        ).toBe("pr");
         expect(
-          mock.getHead()
-        ).toBe(
-          fulfilled[0].value.review_commit
+          fulfilled[1].value.writeback_mode
+        ).toBe("pr");
+
+        // dev head never changed
+        expect(mock.getHead()).toBe(
+          CODE_SHA
         );
       }
     );

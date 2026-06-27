@@ -316,37 +316,37 @@ describe("submitReview uses single repository for entire call chain", () => {
   });
 
   it("concurrent branch update is rejected", async () => {
-    // submitReview calls getBranchHeadSha + updateBranchRefFastForward
-    // which re-reads branch head before PATCH. GET returns valid SHA;
-    // the PATCH (/git/refs/heads/) returns 422.
-    let patchForceCorrect = false;
+    // submitReview reads branch head twice: initial pin + re-read check.
+    // First GET returns one SHA, second returns a different one — code
+    // detects the mismatch and throws before any writeback steps.
+    const firstSha = "f".repeat(40);
+    const changedSha = "e".repeat(40);
+    let getCallCount = 0;
 
     vi.stubGlobal("fetch", vi.fn(async (url, options) => {
       const urlStr = String(url);
 
-      // GET branch head (no "s" after ref) — always succeeds
+      // GET branch head — changes between calls
       if (urlStr.includes("/git/ref/heads/dev") && !urlStr.includes("refs")) {
+        getCallCount++;
+        const sha = getCallCount === 1 ? firstSha : changedSha;
         return new Response(
-          JSON.stringify({ object: { sha: "f".repeat(40) } }),
+          JSON.stringify({ object: { sha } }),
           { status: 200 }
         );
       }
 
-      // PATCH branch ref (with "s") — simulates concurrent update
+      // PATCH branch ref (should not be reached for dev)
       if (urlStr.includes("/git/refs/heads/dev")) {
-        if (options && options.body) {
-          const body = JSON.parse(options.body);
-          patchForceCorrect = body.force === false;
-        }
         return new Response(
-          JSON.stringify({ message: "Reference update failed" }),
-          { status: 422 }
+          JSON.stringify({ message: "should not reach PATCH dev" }),
+          { status: 200 }
         );
       }
 
       if (urlStr.includes("/commits/")) {
         return new Response(
-          JSON.stringify(makeMockCommit("f".repeat(40), "tree-sha", false)),
+          JSON.stringify(makeMockCommit(firstSha, "tree-sha", false)),
           { status: 200 }
         );
       }
@@ -379,7 +379,7 @@ describe("submitReview uses single repository for entire call chain", () => {
       submitReview(
         { GITHUB_TOKEN: "test-token" },
         {
-          commit: "f".repeat(40),
+          commit: firstSha,
           verdict: "approved",
           summary: "Concurrent test",
           findings: []
@@ -387,7 +387,6 @@ describe("submitReview uses single repository for entire call chain", () => {
         "xinbaijin"
       )
     ).rejects.toThrow(/Concurrent branch update detected/);
-    expect(patchForceCorrect).toBe(true);
   });
 
   it("submitReview rejects undefined repository", async () => {

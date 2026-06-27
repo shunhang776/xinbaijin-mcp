@@ -514,48 +514,71 @@ async function createReviewGitCommit(
   };
 }
 
-async function updateBranchRefFastForward(
+// updateBranchRefFastForward removed — submitReview now uses PR-based writeback.
+// The re-read + concurrent check has been moved into submitReview itself.
+
+async function createBranchRef(
   env,
-  newCommitSha,
-  expectedParentSha,
+  branchName,
+  sha,
   repositoryName
 ) {
-  const { owner, repo, branch, token } =
+  const { owner, repo, token } =
     getRepositoryConfig(env, repositoryName);
 
-  // Defense-in-depth: re-read branch head immediately before PATCH.
-  // Shrinks the race window. Combined with force:false this ensures
-  // the new commit is a descendant of the current tip.
-  //
-  // NOTE: The re-read + PATCH below is NOT an atomic compare-and-swap.
-  // A race window remains between the re-read and the PATCH where another
-  // actor could force-push dev to an ancestor. The review commit would
-  // still be a descendant of that ancestor, so force:false might allow it.
-  //
-  // Required operational mitigations:
-  //   - Enable branch protection on dev: no force-push, no deletion.
-  //   - Ensure submit_review has a single serial writer (no concurrent
-  //     review submissions against the same branch).
-  //
-  // These together close the residual TOCTOU window.
-  const currentHead = await getBranchHeadSha(env, repositoryName);
-
-  if (currentHead !== expectedParentSha) {
+  if (!token) {
     throw new Error(
-      "Concurrent branch update detected. The review was not published. " +
-      "Run get_latest_handoff and get_patch again before resubmitting."
+      "GITHUB_TOKEN is not configured in Cloudflare Worker secrets."
+    );
+  }
+
+  const endpoint =
+    `https://api.github.com/repos/${owner}/${repo}/git/refs`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: githubHeaders(token),
+    body: JSON.stringify({
+      ref: `refs/heads/${branchName}`,
+      sha
+    })
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+
+    throw new Error(
+      `Unable to create branch ref ${branchName}: ${response.status} ${details}`
+    );
+  }
+
+  return response.json();
+}
+
+async function updateBranchRef(
+  env,
+  branchName,
+  newSha,
+  repositoryName
+) {
+  const { owner, repo, token } =
+    getRepositoryConfig(env, repositoryName);
+
+  if (!token) {
+    throw new Error(
+      "GITHUB_TOKEN is not configured in Cloudflare Worker secrets."
     );
   }
 
   const endpoint =
     `https://api.github.com/repos/${owner}/${repo}` +
-    `/git/refs/heads/${encodeGitRef(branch)}`;
+    `/git/refs/heads/${encodeGitRef(branchName)}`;
 
   const response = await fetch(endpoint, {
     method: "PATCH",
     headers: githubHeaders(token),
     body: JSON.stringify({
-      sha: newCommitSha,
+      sha: newSha,
       force: false
     })
   });
@@ -563,18 +586,50 @@ async function updateBranchRefFastForward(
   if (!response.ok) {
     const details = await response.text();
 
-    if (
-      response.status === 409 ||
-      response.status === 422
-    ) {
-      throw new Error(
-        "Concurrent branch update detected. The review was not published. " +
-        "Run get_latest_handoff and get_patch again before resubmitting."
-      );
-    }
+    throw new Error(
+      `Unable to update branch ref ${branchName}: ${response.status} ${details}`
+    );
+  }
+
+  return response.json();
+}
+
+async function createPullRequest(
+  env,
+  title,
+  body,
+  head,
+  base,
+  repositoryName
+) {
+  const { owner, repo, token } =
+    getRepositoryConfig(env, repositoryName);
+
+  if (!token) {
+    throw new Error(
+      "GITHUB_TOKEN is not configured in Cloudflare Worker secrets."
+    );
+  }
+
+  const endpoint =
+    `https://api.github.com/repos/${owner}/${repo}/pulls`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: githubHeaders(token),
+    body: JSON.stringify({
+      title,
+      head,
+      base,
+      body
+    })
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
 
     throw new Error(
-      `Unable to update branch reference: ${response.status} ${details}`
+      `Unable to create pull request: ${response.status} ${details}`
     );
   }
 
@@ -636,7 +691,7 @@ async function submitReview(env, input, repositoryName) {
     `chore(review): ${input.verdict} ` +
     `${expectedCommit.slice(0, 7)} [skip-review]`;
 
-  // 先创建一个以 branchHead 为唯一父提交的候选提交。
+  // 创建以 branchHead 为唯一父提交的 review commit。
   const created =
     await createReviewGitCommit(
       env,
@@ -646,12 +701,67 @@ async function submitReview(env, input, repositoryName) {
       repositoryName
     );
 
-  // 最后用非强制 fast-forward 更新分支。
-  // 若 branchHead 已变化，这一步会失败，旧审查不会落到新代码之上。
-  await updateBranchRefFastForward(
+  // 并发保护：重读 dev branch head。若已变化则拒绝整次审查，
+  // 旧审查不会落到新代码之上。
+  const currentHead =
+    await getBranchHeadSha(env, repositoryName);
+
+  if (currentHead !== branchHead) {
+    throw new Error(
+      "Concurrent branch update detected. The review was not published. " +
+      "Run get_latest_handoff and get_patch again before resubmitting."
+    );
+  }
+
+  // 生成 review 写回分支名：review/{repo}/{短sha}-{Git ref 安全时间戳}
+  const shortSha = expectedCommit.slice(0, 7);
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-");
+  const reviewBranchName =
+    `review/${repo}/${shortSha}-${timestamp}`;
+
+  // 创建 review 写回分支，指向 pin 住的 branchHead。
+  await createBranchRef(
     env,
-    created.commitSha,
+    reviewBranchName,
     branchHead,
+    repositoryName
+  );
+
+  // 将 review 分支快进到新 review commit。
+  await updateBranchRef(
+    env,
+    reviewBranchName,
+    created.commitSha,
+    repositoryName
+  );
+
+  // 创建 PR：base = dev，head = review 写回分支。
+  const prTitle =
+    `chore(review): ${input.verdict} ${shortSha}`;
+
+  const findingsCount = Array.isArray(input.findings)
+    ? input.findings.length
+    : 0;
+
+  const prBody =
+    `## Review\n` +
+    `- **Repository**: ${owner}/${repo}\n` +
+    `- **Reviewed Commit**: ${expectedCommit}\n` +
+    `- **Based on Branch Head**: ${branchHead}\n` +
+    `- **Verdict**: ${input.verdict}\n` +
+    `- **Findings**: ${findingsCount}\n` +
+    `\n` +
+    `### Summary\n` +
+    `${input.summary}\n`;
+
+  const prResponse = await createPullRequest(
+    env,
+    prTitle,
+    prBody,
+    reviewBranchName,
+    branch,
     repositoryName
   );
 
@@ -666,7 +776,11 @@ async function submitReview(env, input, repositoryName) {
     verdict: input.verdict,
     review_commit: created.commitSha,
     file_sha: created.blobSha,
-    message: "review.json updated successfully"
+    review_branch: reviewBranchName,
+    pull_request_url: prResponse.html_url,
+    pull_request_number: prResponse.number,
+    writeback_mode: "pr",
+    message: "review.json submitted via pull request"
   };
 }
 
@@ -677,6 +791,9 @@ export {
   submitReview,
   getLatestReviewableCommit,
   githubHeaders,
-  isReviewOnlyCommit
+  isReviewOnlyCommit,
+  createBranchRef,
+  updateBranchRef,
+  createPullRequest
 };
 
