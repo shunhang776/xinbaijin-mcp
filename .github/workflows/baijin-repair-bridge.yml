@@ -1,0 +1,35 @@
+name: baijin-repair-bridge
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - "review.json"
+
+permissions:
+  contents: read
+
+jobs:
+  bridge:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+
+      - name: Run repair bridge
+        shell: pwsh
+        run: |
+          ./scripts/repair-bridge.ps1 `
+            -RepoRoot ${{ github.workspace }} `
+            -ExpectedRepository ${{ github.repository }} `
+            -Branch dev
+
+      - name: Upload repair artifacts
+        if: always()
+        uses: actions/upload-artifact@27e09da309b2128567ed3ee24a07af41a69f9a5a
+        with:
+          name: repair-bridge-output
+          path: .baijin/repair-bridge/
+          retention-days: 7
