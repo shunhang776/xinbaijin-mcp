@@ -1,14 +1,21 @@
 {
-    "protocol":  "xinbaijin-review/1.0",
-    "repository":  "shunhang776/xinbaijin-mcp",
-    "branch":  "dev",
-    "reviewed_commit":  "8c63e458ac418396288b85b0f08f77b3f951681e",
-    "based_on_branch_head":  "8c63e458ac418396288b85b0f08f77b3f951681e",
-    "verdict":  "approved",
-    "summary":  "Phase 6 final acceptance documentation state approved.",
-    "findings":  [
-
-                 ],
-    "reviewer":  "ChatGPT",
-    "reviewed_at":  "2026-06-26T11:10:35.646Z"
+  "protocol": "xinbaijin-review/1.0",
+  "repository": "shunhang776/xinbaijin-mcp",
+  "branch": "dev",
+  "reviewed_commit": "174c3cfccc075c0e85c0d524c8de7c61c9151696",
+  "based_on_branch_head": "174c3cfccc075c0e85c0d524c8de7c61c9151696",
+  "verdict": "changes_requested",
+  "summary": "审查发现此次提交修复了 PR writeback 的 GitHub Token 权限提示、review 分支 nonce、防止直接 PATCH dev、get_latest_handoff 跳过 review-only commit 等问题；但 PR-based review 写回仍缺少合并前 stale/base-head 强制校验。当前实现只在创建 review PR 前重读 dev head，不能阻止 review PR 创建后被合并到已经前进的 dev 上，因此需要补齐 required check 或等价 gate 校验后再通过。",
+  "findings": [
+    {
+      "severity": "high",
+      "file": "review-core.js",
+      "line": 740,
+      "title": "PR 写回缺少合并前 based_on_branch_head 强制校验",
+      "description": "submitReview 在创建 review PR 前会重读 dev branch head，并将 based_on_branch_head 写入 review.json 与 PR body；但 PR 创建之后到实际 merge 之前仍存在窗口。如果 dev 在此期间合入新的代码提交，而仓库规则没有强制校验 review.json.based_on_branch_head 等于当前 dev HEAD、reviewed_commit 仍为 latest reviewable code commit，该 review.json PR 仍可能被合并到更新后的 dev 上，导致旧审查结果落到新分支状态。当前提交没有新增可执行 required check、workflow、gate 脚本或同等强制机制来阻止该 stale review PR 合并。",
+      "recommendation": "新增并启用合并前强制校验：在 review PR 的 required check 中读取 PR head 的 review.json，校验 repository、reviewed_commit、based_on_branch_head、verdict 等字段，并确认 based_on_branch_head 等于当前 base dev HEAD、reviewed_commit 仍等于 latest reviewable code commit；不一致时该 check 必须失败并被 dev 分支保护列为 required check。不能只依赖 PR body 或人工阅读。"
+    }
+  ],
+  "reviewer": "ChatGPT",
+  "reviewed_at": "2026-06-27T14:09:43.063Z"
 }
