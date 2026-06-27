@@ -8,7 +8,6 @@ param(
 )
 
 Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = [System.IO.Path]::GetFullPath(
