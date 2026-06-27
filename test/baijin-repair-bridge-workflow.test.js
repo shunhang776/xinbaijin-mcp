@@ -31,6 +31,12 @@ describe(
       );
     });
 
+    it("supports manual workflow_dispatch trigger", () => {
+      expect(yaml).toContain(
+        "workflow_dispatch"
+      );
+    });
+
     it("only triggers when review.json changes", () => {
       expect(yaml).toContain(
         "paths:"
