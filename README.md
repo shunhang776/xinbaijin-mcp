@@ -17,7 +17,7 @@ Set via `npx wrangler secret put` (available as `env.*` in the Worker):
 | Variable | Purpose | Permission |
 |---|---|---|
 | `MCP_ACCESS_TOKEN` | Authenticates ChatGPT MCP connector | Arbitrary secret |
-| `GITHUB_TOKEN` | Runtime: read/write repo contents, create commits | Contents: Read and write |
+| `GITHUB_TOKEN` | Runtime: read/write repo contents, create commits, create PRs | Contents: Read and write, Pull requests: Read and write |
 
 ```bash
 npx wrangler secret put MCP_ACCESS_TOKEN
