@@ -29,7 +29,7 @@ jobs:
 
       - name: Upload repair artifacts
         if: always()
-        uses: actions/upload-artifact@27e09da309b2128567ed3ee24a07af41a69f9a5a
+        uses: actions/upload-artifact@v4
         with:
           name: repair-bridge-output
           path: .baijin/repair-bridge/
