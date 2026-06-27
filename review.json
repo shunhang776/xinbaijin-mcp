@@ -1,14 +1,29 @@
 {
-    "protocol":  "xinbaijin-review/1.0",
-    "repository":  "shunhang776/xinbaijin-mcp",
-    "branch":  "dev",
-    "reviewed_commit":  "8c63e458ac418396288b85b0f08f77b3f951681e",
-    "based_on_branch_head":  "8c63e458ac418396288b85b0f08f77b3f951681e",
-    "verdict":  "approved",
-    "summary":  "Phase 6 final acceptance documentation state approved.",
-    "findings":  [
-
-                 ],
-    "reviewer":  "ChatGPT",
-    "reviewed_at":  "2026-06-26T11:10:35.646Z"
+  "protocol": "xinbaijin-review/1.0",
+  "repository": "shunhang776/xinbaijin-mcp",
+  "branch": "dev",
+  "reviewed_commit": "3041e2f301a0fbea01c805facb661dff1cfa92e2",
+  "based_on_branch_head": "3041e2f301a0fbea01c805facb661dff1cfa92e2",
+  "verdict": "changes_requested",
+  "summary": "审查发现 PR-based review writeback 方向正确，已避免直接 PATCH 受保护的 dev 分支，并保留了提交前的 stale review 与 branch head re-read 校验；但当前实现仍缺少 review PR 合并前的 stale/base-head 强制校验，且 review 分支命名在同一毫秒并发提交时可能碰撞。需要补齐这些保护后再进入完整真实执行闭环。",
+  "findings": [
+    {
+      "severity": "high",
+      "file": "review-core.js",
+      "line": 731,
+      "title": "PR 写回缺少合并前 based_on_branch_head 强制校验",
+      "description": "submitReview 在创建 review PR 前会重读 dev branch head，但 PR 创建后到实际合并前仍存在时间窗口。如果 dev 在 review PR 创建后又合入了新的代码提交，而仓库规则没有强制“PR 分支必须与 base 最新同步”，这个 review.json PR 仍可能被合并到更新后的 dev 上，导致旧 reviewed_commit 的审查结果覆盖当前分支状态。当前实现只是把 based_on_branch_head 写入 review.json 和 PR body，没有提供会阻止 stale review PR 合并的强制检查。",
+      "recommendation": "为 review 写回 PR 增加合并前强制校验：在 required check 中读取 PR base 当前 SHA 与 review.json 的 based_on_branch_head，若不一致则失败；或在 PR 创建后/合并前由专门的 gate 验证 reviewed_commit、based_on_branch_head 与当前 latest reviewable commit 一致。该 check 应加入分支保护 required checks，不能只依赖人工阅读 PR body。"
+    },
+    {
+      "severity": "medium",
+      "file": "review-core.js",
+      "line": 707,
+      "title": "review 分支名缺少 nonce，存在同毫秒并发碰撞风险",
+      "description": "reviewBranchName 由 repository、reviewed_commit 前 7 位和毫秒级 timestamp 组成。两个针对同一仓库、同一 reviewed_commit 的 submit_review 请求如果在同一毫秒生成分支名，会尝试创建相同 refs/heads/review/... 分支，第二个请求会因 ref 已存在而失败。新增的并发测试没有覆盖该碰撞，因为 mock 没有模拟 GitHub 对重复 ref 的 422。",
+      "recommendation": "在 review 分支名中追加随机 nonce、GitHub run id 或 created.commitSha 前缀，例如 review/<repo>/<shortSha>-<timestamp>-<nonce>；并增加测试模拟重复 ref 返回 422，验证实现会重试生成新分支或给出可恢复错误。"
+    }
+  ],
+  "reviewer": "ChatGPT",
+  "reviewed_at": "2026-06-27T13:26:59.525Z"
 }
