@@ -169,64 +169,86 @@ switch ($verdict) {
     "changes_requested" {
         Write-Host "bridge: verdict=changes_requested — generating repair handoff (round $repairRound)"
 
-        # 3a. Run repair-validate
+        $validateExit = 0
+        $validateResult = @()
+        $prepareExit = 0
+        $prepareResult = @()
+        $promptExit = 0
+        $promptResult = @()
+
+        # 3a. Run repair-validate (best-effort)
         Write-Host "bridge: running repair-validate..."
-        $validateArgs = @(
-            "-RepoRoot", $RepoRoot,
-            "-ExpectedRepository", $ExpectedRepository,
-            "-Branch", $Branch
-        )
-        if ($NoFetch) {
-            $validateArgs += "-NoFetch"
+        try {
+            $validateArgs = @(
+                "-RepoRoot", $RepoRoot,
+                "-ExpectedRepository", $ExpectedRepository,
+                "-Branch", $Branch
+            )
+            if ($NoFetch) { $validateArgs += "-NoFetch" }
+
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            $validateResult = & $RepairValidateScript @validateArgs 2>&1
+            $validateExit = $LASTEXITCODE
+            $ErrorActionPreference = $prevEAP
+        } catch {
+            $validateExit = 1
+            $validateResult = @("repair-validate exception: $_")
         }
-
-        $validateResult = & $RepairValidateScript @validateArgs 2>&1
-        $validateExit = $LASTEXITCODE
-
         Write-Host "bridge: repair-validate exit=$validateExit"
         if ($validateResult) {
             $validateResult | ForEach-Object { Write-Host "  validate: $_" }
         }
 
-        # 3b. Run repair-run Prepare to create worktree + prompt
+        # 3b. Run repair-run Prepare (best-effort)
         Write-Host "bridge: running repair-run -Mode Prepare..."
-        $prepareArgs = @(
-            "-Mode", "Prepare",
-            "-RepoRoot", $RepoRoot,
-            "-Branch", $Branch,
-            "-ReviewedCommit", $reviewedCommit
-        )
-        if ($NoFetch) {
-            $prepareArgs += "-NoFetch"
+        try {
+            $prepareArgs = @(
+                "-Mode", "Prepare",
+                "-RepoRoot", $RepoRoot,
+                "-Branch", $Branch,
+                "-ReviewedCommit", $reviewedCommit
+            )
+            if ($NoFetch) { $prepareArgs += "-NoFetch" }
+
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            $prepareResult = & $RepairRunScript @prepareArgs 2>&1
+            $prepareExit = $LASTEXITCODE
+            $ErrorActionPreference = $prevEAP
+        } catch {
+            $prepareExit = 1
+            $prepareResult = @("repair-run exception: $_")
         }
-
-        $prepareResult = & $RepairRunScript @prepareArgs 2>&1
-        $prepareExit = $LASTEXITCODE
-
         Write-Host "bridge: repair-run Prepare exit=$prepareExit"
         if ($prepareResult) {
             $prepareResult | ForEach-Object { Write-Host "  prepare: $_" }
         }
 
-        # 3c. Run repair-prompt to generate prompt artifacts
+        # 3c. Run repair-prompt (best-effort)
         Write-Host "bridge: running repair-prompt..."
         $promptOutputPath = Join-Path $OutputDir "repair-prompt.md"
         $promptContextPath = Join-Path $OutputDir "repair-context.json"
 
-        # repair-prompt.ps1 has its own param names — pass through what we have
-        $promptArgs = @(
-            "-RepoRoot", $RepoRoot,
-            "-OutputPath", $promptOutputPath,
-            "-ContextPath", $promptContextPath
-        )
-        if ($reviewedCommit) {
-            # repair-prompt expects -ReviewedCommit
-            $promptArgs += @("-ReviewedCommit", $reviewedCommit)
+        try {
+            $promptArgs = @(
+                "-RepoRoot", $RepoRoot,
+                "-OutputPath", $promptOutputPath,
+                "-ContextPath", $promptContextPath
+            )
+            if ($reviewedCommit) {
+                $promptArgs += @("-ReviewedCommit", $reviewedCommit)
+            }
+
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            $promptResult = & $RepairPromptScript @promptArgs 2>&1
+            $promptExit = $LASTEXITCODE
+            $ErrorActionPreference = $prevEAP
+        } catch {
+            $promptExit = 1
+            $promptResult = @("repair-prompt exception: $_")
         }
-
-        $promptResult = & $RepairPromptScript @promptArgs 2>&1
-        $promptExit = $LASTEXITCODE
-
         Write-Host "bridge: repair-prompt exit=$promptExit"
         if ($promptResult) {
             $promptResult | ForEach-Object { Write-Host "  prompt: $_" }
